@@ -5,10 +5,12 @@ use aura_common::{RunningTool, SessionInfo, SessionState};
 use crate::registry::SessionRegistry;
 use gpui::{
     div, point, px, size, svg, App, AppContext, Application, AssetSource, Bounds, Context, Div,
-    Entity, IntoElement, ParentElement, Render, Result as GpuiResult, SharedString, Styled, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
+    Entity, InteractiveElement, IntoElement, ParentElement, Render, Result as GpuiResult,
+    SharedString, StatefulInteractiveElement, Styled, Window, WindowBackgroundAppearance,
+    WindowBounds, WindowKind, WindowOptions,
 };
 use std::borrow::Cow;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Asset source for loading icons from the assets directory
@@ -28,6 +30,8 @@ impl AssetSource for Assets {
             "icons/plug.svg" => include_bytes!("../../assets/icons/plug.svg").as_slice(),
             "icons/bot.svg" => include_bytes!("../../assets/icons/bot.svg").as_slice(),
             "icons/settings.svg" => include_bytes!("../../assets/icons/settings.svg").as_slice(),
+            "icons/check.svg" => include_bytes!("../../assets/icons/check.svg").as_slice(),
+            "icons/bell.svg" => include_bytes!("../../assets/icons/bell.svg").as_slice(),
             _ => return Ok(None),
         };
         Ok(Some(Cow::Borrowed(content)))
@@ -41,48 +45,215 @@ impl AssetSource for Assets {
 /// Row dimensions
 const ROW_HEIGHT: f32 = 32.0;
 const ROW_GAP: f32 = 4.0;
-/// Window width (enough for session name + state + tools)
-const WINDOW_WIDTH: f32 = 320.0;
+/// Window dimensions
+const COLLAPSED_WIDTH: f32 = 60.0; // Two icons side by side
+const COLLAPSED_HEIGHT: f32 = 28.0; // Single row height
+const EXPANDED_WIDTH: f32 = 200.0; // Compact session list width
 /// Max sessions to display
 const MAX_SESSIONS: usize = 5;
+/// Icon size for collapsed view
+const ICON_SIZE: f32 = 16.0;
+
+/// Collapse delay in milliseconds
+const COLLAPSE_DELAY_MS: u128 = 3000;
 
 /// HUD view showing session rows
 struct HudView {
     state: Entity<HudStateModel>,
+    is_expanded: bool,
+    is_hovered: bool,
+    /// Time when mouse left the window (for delayed collapse)
+    hover_left_at: Option<Instant>,
+    /// Shared flag set by background thread when collapse should happen
+    collapse_signal: Arc<AtomicBool>,
+    /// Last known session count (for resize detection)
+    last_session_count: usize,
+}
+
+impl HudView {
+    fn set_expanded(&mut self, expanded: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_expanded == expanded {
+            return;
+        }
+        self.is_expanded = expanded;
+
+        // Calculate new window size
+        let num_sessions = self.state.read(cx).sessions.len().min(MAX_SESSIONS);
+        let (width, height) = if expanded {
+            let h = (ROW_HEIGHT + ROW_GAP) * num_sessions as f32 + 12.0;
+            (EXPANDED_WIDTH, h)
+        } else {
+            (COLLAPSED_WIDTH, COLLAPSED_HEIGHT)
+        };
+
+        // Resize window (keeps top-left position, so expanded will grow to the right)
+        window.resize(size(px(width), px(height)));
+        cx.notify();
+    }
+
+    fn set_hovered(&mut self, hovered: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.is_hovered = hovered;
+
+        if hovered {
+            // Mouse entered - expand immediately and clear any pending collapse
+            self.hover_left_at = None;
+            self.collapse_signal.store(false, Ordering::SeqCst);
+            self.set_expanded(true, window, cx);
+        } else {
+            // Mouse left - start collapse timer
+            self.hover_left_at = Some(Instant::now());
+
+            // Spawn background thread to signal collapse after delay
+            let signal = self.collapse_signal.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(COLLAPSE_DELAY_MS as u64));
+                signal.store(true, Ordering::SeqCst);
+            });
+        }
+    }
+
 }
 
 impl Render for HudView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Request continuous animation frames (for smooth animation + registry polling)
+        window.request_animation_frame();
+
+        // Check if background thread signaled collapse
+        if self.collapse_signal.swap(false, Ordering::SeqCst) {
+            // Only collapse if we're still in the "left" state (not re-hovered)
+            if self.hover_left_at.is_some() {
+                self.hover_left_at = None;
+                self.set_expanded(false, window, cx);
+            }
+        }
+
+        // Refresh sessions from registry on each frame
+        self.state.update(cx, |state, _cx| {
+            state.refresh_from_registry();
+        });
+
         let hud_state = self.state.read(cx);
         let sessions = &hud_state.sessions;
+        let is_expanded = self.is_expanded;
+
+        // Resize window if session count changed while expanded
+        let current_count = sessions.len().min(MAX_SESSIONS);
+        if is_expanded && current_count != self.last_session_count {
+            self.last_session_count = current_count;
+            let height = (ROW_HEIGHT + ROW_GAP) * current_count as f32 + 12.0;
+            window.resize(size(px(EXPANDED_WIDTH), px(height)));
+        }
 
         // Calculate animation state (shared across all sessions for sync switching)
         let (tool_index, fade_progress) =
             calculate_animation_state(hud_state.animation_start, hud_state.animation_seed);
 
-        // Request continuous animation frames (for smooth animation)
-        window.request_animation_frame();
-
         if sessions.is_empty() {
-            return div().size_full();
+            return div().id("hud-empty").size_full();
         }
 
-        // Vertical stack of session rows
+        // Calculate aggregate state for collapsed view
+        let has_attention = sessions.iter().any(|s| s.state == SessionState::Attention);
+        let aggregate_state = get_aggregate_state(sessions);
+
+        // Clone data needed for closures
+        let sessions_for_render: Vec<_> = sessions
+            .iter()
+            .take(MAX_SESSIONS)
+            .cloned()
+            .collect();
+
+        // Container for HUD content
         div()
+            .id("hud-container")
             .size_full()
-            .flex()
-            .flex_col()
-            .gap(px(ROW_GAP))
-            .p(px(6.0))
-            .rounded(px(8.0))
-            .bg(gpui::rgba(0x000000CC)) // Dark semi-transparent background
-            .children(
-                sessions
-                    .iter()
-                    .take(MAX_SESSIONS)
-                    .map(|session| render_session_row(session, tool_index, fade_progress)),
-            )
+            .cursor_pointer()
+            .on_hover(cx.listener(|this, hovered: &bool, window, cx| {
+                this.set_hovered(*hovered, window, cx);
+            }))
+            .child(if is_expanded {
+                // Expanded view: full session list
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .gap(px(ROW_GAP))
+                    .p(px(6.0))
+                    .rounded_bl(px(8.0))
+                    .rounded_br(px(8.0))
+                    .bg(gpui::rgba(0x000000CC))
+                    .children(
+                        sessions_for_render
+                            .iter()
+                            .map(|session| render_session_row(session, tool_index, fade_progress)),
+                    )
+            } else {
+                // Collapsed view: two icons
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(8.0))
+                    .p(px(6.0))
+                    .rounded_bl(px(8.0))
+                    .rounded_br(px(8.0))
+                    .bg(gpui::rgba(0x000000CC))
+                    // Left icon: attention indicator
+                    .child(render_status_icon(has_attention))
+                    // Right icon: aggregate state
+                    .child(render_aggregate_icon(aggregate_state))
+            })
     }
+}
+
+/// Get aggregate state from sessions (priority: Running > Compacting > Idle > Stale)
+fn get_aggregate_state(sessions: &[SessionInfo]) -> SessionState {
+    if sessions.iter().any(|s| s.state == SessionState::Running) {
+        SessionState::Running
+    } else if sessions.iter().any(|s| s.state == SessionState::Compacting) {
+        SessionState::Compacting
+    } else if sessions.iter().any(|s| s.state == SessionState::Idle) {
+        SessionState::Idle
+    } else {
+        SessionState::Stale
+    }
+}
+
+/// Render left status icon (attention indicator)
+fn render_status_icon(has_attention: bool) -> Div {
+    let (icon_path, color) = if has_attention {
+        ("icons/bell.svg", icons::colors::YELLOW)
+    } else {
+        ("icons/check.svg", icons::colors::GREEN)
+    };
+
+    div()
+        .size(px(ICON_SIZE))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(svg().path(icon_path).size(px(ICON_SIZE)).text_color(color))
+}
+
+/// Render right aggregate state icon
+fn render_aggregate_icon(state: SessionState) -> Div {
+    let (icon_path, color) = match state {
+        SessionState::Running => ("icons/terminal.svg", icons::colors::GREEN),
+        SessionState::Compacting => ("icons/settings.svg", icons::colors::PURPLE), // rotating gear
+        SessionState::Idle => ("icons/file.svg", icons::colors::BLUE),
+        SessionState::Attention => ("icons/bell.svg", icons::colors::YELLOW),
+        SessionState::Stale => ("icons/file.svg", icons::colors::GRAY),
+    };
+
+    div()
+        .size(px(ICON_SIZE))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(svg().path(icon_path).size(px(ICON_SIZE)).text_color(color))
 }
 
 /// Render a session row: status dot + session name + current tool
@@ -107,14 +278,15 @@ fn render_session_row(session: &SessionInfo, tool_index: usize, fade_progress: f
                 .rounded_full()
                 .bg(state_color),
         )
-        // Session name
+        // Session name (auto-width, max 80px)
         .child(
             div()
                 .flex_shrink_0()
-                .w(px(100.0))
+                .max_w(px(80.0))
                 .text_size(px(13.0))
                 .text_color(gpui::rgb(0xFFFFFF))
                 .overflow_hidden()
+                .whitespace_nowrap()
                 .child(session_name),
         )
         // Current tool (cycles through tools with cross-fade)
@@ -224,69 +396,25 @@ fn state_to_color(state: SessionState) -> gpui::Hsla {
 
 /// Shared HUD state model
 struct HudStateModel {
-    /// Current sessions to display
+    /// Current sessions to display (refreshed from registry)
     sessions: Vec<SessionInfo>,
     /// Animation start time for time-based tool cycling
     animation_start: Instant,
     /// Random seed for animation timing (fixed per session)
     animation_seed: u64,
-    #[allow(dead_code)]
+    /// Registry reference for refreshing session data
     registry: Arc<Mutex<SessionRegistry>>,
 }
 
 impl HudStateModel {
-    #[allow(dead_code)]
-    fn update_from_registry(&mut self) {
+    /// Refresh sessions from registry
+    fn refresh_from_registry(&mut self) {
         if let Ok(registry) = self.registry.lock() {
             self.sessions = registry.get_all();
         }
     }
 }
 
-/// Create demo sessions for testing
-fn create_demo_sessions() -> Vec<SessionInfo> {
-    vec![
-        SessionInfo {
-            session_id: "session-1".into(),
-            cwd: "/Users/dev/projects/aura".into(),
-            state: SessionState::Running,
-            running_tools: vec![
-                RunningTool { tool_id: "t1".into(), tool_name: "Bash".into() },
-                RunningTool { tool_id: "t2".into(), tool_name: "Read".into() },
-                RunningTool { tool_id: "t3".into(), tool_name: "Grep".into() },
-                RunningTool { tool_id: "t4".into(), tool_name: "Edit".into() },
-                RunningTool { tool_id: "t5".into(), tool_name: "Write".into() },
-            ],
-        },
-        SessionInfo {
-            session_id: "session-2".into(),
-            cwd: "/Users/dev/projects/my-app".into(),
-            state: SessionState::Attention,
-            running_tools: vec![
-                RunningTool { tool_id: "t6".into(), tool_name: "Task".into() },
-                RunningTool { tool_id: "t7".into(), tool_name: "WebFetch".into() },
-                RunningTool { tool_id: "t8".into(), tool_name: "mcp__notion".into() },
-            ],
-        },
-        SessionInfo {
-            session_id: "session-3".into(),
-            cwd: "/Users/dev/work/api-server".into(),
-            state: SessionState::Compacting,
-            running_tools: vec![
-                RunningTool { tool_id: "t9".into(), tool_name: "Glob".into() },
-                RunningTool { tool_id: "t10".into(), tool_name: "WebSearch".into() },
-            ],
-        },
-        SessionInfo {
-            session_id: "session-4".into(),
-            cwd: "/Users/dev/old-project".into(),
-            state: SessionState::Idle,
-            running_tools: vec![
-                RunningTool { tool_id: "t11".into(), tool_name: "TodoWrite".into() },
-            ],
-        },
-    ]
-}
 
 /// Animation timing constants
 const CYCLE_DURATION_MIN_MS: u64 = 1500; // Min time showing each tool
@@ -361,9 +489,11 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>) {
 
         let screen_width = display_bounds.size.width;
 
-        // Create demo sessions for testing
-        let demo_sessions = create_demo_sessions();
-        let num_sessions = demo_sessions.len();
+        // Get initial sessions from registry
+        let initial_sessions = registry
+            .lock()
+            .map(|r| r.get_all())
+            .unwrap_or_default();
 
         // Generate random seed from system time for varied animation timing
         let animation_seed = std::time::SystemTime::now()
@@ -371,41 +501,48 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>) {
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0);
 
-        // Create shared state model with demo data
+        // Create shared state model with registry data
         let hud_state = app.new(|_cx| HudStateModel {
-            sessions: demo_sessions,
+            sessions: initial_sessions,
             animation_start: Instant::now(),
             animation_seed,
             registry,
         });
 
-        // Calculate window height based on number of sessions
-        let window_height = (ROW_HEIGHT + ROW_GAP) * num_sessions as f32 + 12.0; // +padding
-
-        // Position window at top-right of screen
-        let window_x = screen_width - px(WINDOW_WIDTH + 20.0); // 20px from right edge
-        let window_y = px(4.0); // Small offset from top
+        // Start with collapsed view, centered under notch
+        // Position so that when expanded, the window grows to the right
+        let window_x = (screen_width - px(EXPANDED_WIDTH)) / 2.0;
+        let window_y = px(30.0); // Just below menu bar
 
         let window_bounds = Bounds {
             origin: point(window_x, window_y),
-            size: size(px(WINDOW_WIDTH), px(window_height)),
+            size: size(px(COLLAPSED_WIDTH), px(COLLAPSED_HEIGHT)),
         };
 
-        // Create single HUD window with vertical stack
+        // Create HUD window (starts collapsed)
         let state_for_window = hud_state.clone();
         app.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(window_bounds)),
                 titlebar: None,
-                focus: false,
+                focus: true,
                 show: true,
                 kind: WindowKind::PopUp,
-                is_movable: false,
+                is_movable: true,
                 is_resizable: false,
                 window_background: WindowBackgroundAppearance::Blurred,
                 ..Default::default()
             },
-            |_window, app| app.new(|_cx| HudView { state: state_for_window }),
+            |_window, app| {
+                app.new(|_cx| HudView {
+                    state: state_for_window,
+                    is_expanded: false,
+                    is_hovered: false,
+                    hover_left_at: None,
+                    collapse_signal: Arc::new(AtomicBool::new(false)),
+                    last_session_count: 0,
+                })
+            },
         )
         .expect("Failed to open HUD window");
 
