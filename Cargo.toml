@@ -19,5 +19,8 @@ tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "net", "io-u
 # Error handling
 thiserror = "2.0"
 
+# UI
+gpui = "0.2"
+
 # Internal crates
 aura-common = { path = "crates/aura-common" }

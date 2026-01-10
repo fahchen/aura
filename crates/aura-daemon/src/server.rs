@@ -2,10 +2,9 @@
 
 use crate::registry::SessionRegistry;
 use aura_common::{socket_path, IpcMessage, IpcResponse};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::Mutex;
 
 /// Start the IPC server
 pub async fn run(registry: Arc<Mutex<SessionRegistry>>) -> std::io::Result<()> {
@@ -53,8 +52,10 @@ async fn handle_connection(
     // Parse message
     let response = match serde_json::from_str::<IpcMessage>(&line) {
         Ok(IpcMessage::Event(event)) => {
-            let mut reg = registry.lock().await;
-            reg.process_event(event);
+            // Lock briefly to update state
+            if let Ok(mut reg) = registry.lock() {
+                reg.process_event(event);
+            }
             IpcResponse::Ok
         }
         Ok(IpcMessage::Ping) => IpcResponse::Pong,
