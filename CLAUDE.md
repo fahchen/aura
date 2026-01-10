@@ -46,13 +46,15 @@ aura run <cmd> ──(PTY)──▶ Child Process
 
 ## States
 
-| State | Icon | Color | Trigger |
-|-------|------|-------|---------|
-| Running | `▶` | Green #22C55E | SessionStart, tool hooks |
-| Idle | `◼` | Blue #3B82F6 | Stop |
-| Attention | `🔔` | Yellow #EAB308 | PermissionRequest |
-| Compacting | `⟳` | Purple #A855F7 | PreCompact |
-| Stale | `⏸` | Gray #6B7280 | 60s timeout |
+| State | Icon (SVG) | Color | Trigger |
+|-------|------------|-------|---------|
+| Running | play | Green #22C55E | SessionStart, tool hooks |
+| Idle | stop | Blue #3B82F6 | Stop |
+| Attention | bell | Yellow #EAB308 | PermissionRequest |
+| Compacting | refresh | Purple #A855F7 | PreCompact |
+| Stale | pause | Gray #6B7280 | 60s timeout |
+
+Note: All icons rendered as SVG paths in gpui.
 
 ## Hook Events (All 10)
 
@@ -69,16 +71,16 @@ aura run <cmd> ──(PTY)──▶ Child Process
 | PreCompact | → Compacting |
 | SessionEnd | Remove session |
 
-## Tool Icons
+## Tool Icons (SVG)
 
 | Tool | Icon | Tool | Icon |
 |------|------|------|------|
-| Task | 🤖 | Bash | >_ |
-| Glob | 📂 | Grep | 🔍 |
-| Read | 📖 | Edit | ✏️ |
-| Write | 📝 | WebFetch | 🌐 |
-| WebSearch | 🔎 | mcp__* | 🔌 |
-| (other) | ⚙️ | | |
+| Task | robot | Bash | terminal |
+| Glob | folder | Grep | search |
+| Read | book | Edit | pencil |
+| Write | file | WebFetch | globe |
+| WebSearch | search | mcp__* | plug |
+| (other) | gear | | |
 
 ## Commands
 

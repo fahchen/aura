@@ -1,0 +1,15 @@
+[package]
+name = "aura-hook"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Claude Code hook handler for Aura"
+
+[[bin]]
+name = "aura-hook"
+path = "src/main.rs"
+
+[dependencies]
+aura-common.workspace = true
+serde_json.workspace = true
