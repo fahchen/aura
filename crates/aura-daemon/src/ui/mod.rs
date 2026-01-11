@@ -33,13 +33,12 @@ use session_list::{
 use status_bar::{HEIGHT as COLLAPSED_HEIGHT, WIDTH as COLLAPSED_WIDTH};
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthStr;
 
-/// Collapse delay in milliseconds
-const COLLAPSE_DELAY_MS: u128 = 3000;
+/// Collapse delay duration
+const COLLAPSE_DELAY: Duration = Duration::from_millis(3000);
 
 /// Animation state for a session row's marquee
 #[derive(Clone)]
@@ -65,8 +64,6 @@ struct HudView {
     is_hovered: bool,
     /// Time when mouse left the window (for delayed collapse)
     hover_left_at: Option<Instant>,
-    /// Shared flag set by background thread when collapse should happen
-    collapse_signal: Arc<AtomicBool>,
     /// Last known session count (for resize detection)
     last_session_count: usize,
     /// Per-row marquee animation state (session_id -> state)
@@ -99,18 +96,20 @@ impl HudView {
         if hovered {
             // Mouse entered - expand immediately and clear any pending collapse
             self.hover_left_at = None;
-            self.collapse_signal.store(false, Ordering::SeqCst);
             self.set_expanded(true, window, cx);
         } else {
-            // Mouse left - start collapse timer
+            // Mouse left - record time for delayed collapse (checked in render)
             self.hover_left_at = Some(Instant::now());
+        }
+    }
 
-            // Spawn background thread to signal collapse after delay
-            let signal = self.collapse_signal.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(COLLAPSE_DELAY_MS as u64));
-                signal.store(true, Ordering::SeqCst);
-            });
+    /// Check if collapse delay has elapsed and collapse if so
+    fn check_collapse_delay(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(left_at) = self.hover_left_at {
+            if left_at.elapsed() >= COLLAPSE_DELAY {
+                self.hover_left_at = None;
+                self.set_expanded(false, window, cx);
+            }
         }
     }
 
@@ -233,14 +232,8 @@ impl Render for HudView {
         // Request continuous animation frames (for smooth animation + registry polling)
         window.request_animation_frame();
 
-        // Check if background thread signaled collapse
-        if self.collapse_signal.swap(false, Ordering::SeqCst) {
-            // Only collapse if we're still in the "left" state (not re-hovered)
-            if self.hover_left_at.is_some() {
-                self.hover_left_at = None;
-                self.set_expanded(false, window, cx);
-            }
-        }
+        // Check if collapse delay has elapsed
+        self.check_collapse_delay(window, cx);
 
         // Refresh sessions from registry on each frame
         self.state.update(cx, |state, _cx| {
@@ -393,7 +386,6 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>) {
                     is_expanded: false,
                     is_hovered: false,
                     hover_left_at: None,
-                    collapse_signal: Arc::new(AtomicBool::new(false)),
                     last_session_count: 0,
                     row_states: HashMap::new(),
                 })

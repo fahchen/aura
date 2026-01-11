@@ -6,21 +6,6 @@ use crate::{AgentEvent, AgentType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Hook event name
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum HookEventName {
-    SessionStart,
-    UserPromptSubmit,
-    PreToolUse,
-    PostToolUse,
-    PermissionRequest,
-    Notification,
-    Stop,
-    SubagentStop,
-    PreCompact,
-    SessionEnd,
-}
-
 /// Common fields present in all hook payloads
 /// Note: hook_event_name is not here because serde uses it as the enum tag
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,36 +135,30 @@ pub enum HookEvent {
 }
 
 impl HookEvent {
+    /// Get the common payload fields from any event
+    fn common(&self) -> &HookPayloadCommon {
+        match self {
+            Self::SessionStart(p) => &p.common,
+            Self::UserPromptSubmit(p) => &p.common,
+            Self::PreToolUse(p) => &p.common,
+            Self::PostToolUse(p) => &p.common,
+            Self::PermissionRequest(p) => &p.common,
+            Self::Notification(p) => &p.common,
+            Self::Stop(p) => &p.common,
+            Self::SubagentStop(p) => &p.common,
+            Self::PreCompact(p) => &p.common,
+            Self::SessionEnd(p) => &p.common,
+        }
+    }
+
     /// Get session_id from any event
     pub fn session_id(&self) -> &str {
-        match self {
-            Self::SessionStart(p) => &p.common.session_id,
-            Self::UserPromptSubmit(p) => &p.common.session_id,
-            Self::PreToolUse(p) => &p.common.session_id,
-            Self::PostToolUse(p) => &p.common.session_id,
-            Self::PermissionRequest(p) => &p.common.session_id,
-            Self::Notification(p) => &p.common.session_id,
-            Self::Stop(p) => &p.common.session_id,
-            Self::SubagentStop(p) => &p.common.session_id,
-            Self::PreCompact(p) => &p.common.session_id,
-            Self::SessionEnd(p) => &p.common.session_id,
-        }
+        &self.common().session_id
     }
 
     /// Get cwd from any event
     pub fn cwd(&self) -> &str {
-        match self {
-            Self::SessionStart(p) => &p.common.cwd,
-            Self::UserPromptSubmit(p) => &p.common.cwd,
-            Self::PreToolUse(p) => &p.common.cwd,
-            Self::PostToolUse(p) => &p.common.cwd,
-            Self::PermissionRequest(p) => &p.common.cwd,
-            Self::Notification(p) => &p.common.cwd,
-            Self::Stop(p) => &p.common.cwd,
-            Self::SubagentStop(p) => &p.common.cwd,
-            Self::PreCompact(p) => &p.common.cwd,
-            Self::SessionEnd(p) => &p.common.cwd,
-        }
+        &self.common().cwd
     }
 }
 

@@ -44,24 +44,30 @@ impl Session {
         self.last_activity = Instant::now();
     }
 
-    pub fn to_info(&self) -> SessionInfo {
-        // Combine running tools + non-expired recent tools
+    /// Get all visible tools (running + non-expired recent)
+    fn visible_tools(&self) -> Vec<RunningTool> {
         let now = Instant::now();
         let mut tools = self.running_tools.clone();
-        for recent in &self.recent_tools {
-            if recent.expires_at > now {
-                tools.push(RunningTool {
-                    tool_id: format!("recent_{}", recent.tool_name),
-                    tool_name: recent.tool_name.clone(),
-                });
-            }
-        }
 
+        tools.extend(
+            self.recent_tools
+                .iter()
+                .filter(|t| t.expires_at > now)
+                .map(|t| RunningTool {
+                    tool_id: format!("recent_{}", t.tool_name),
+                    tool_name: t.tool_name.clone(),
+                }),
+        );
+
+        tools
+    }
+
+    pub fn to_info(&self) -> SessionInfo {
         SessionInfo {
             session_id: self.session_id.clone(),
             cwd: self.cwd.clone(),
             state: self.state,
-            running_tools: tools,
+            running_tools: self.visible_tools(),
         }
     }
 }
