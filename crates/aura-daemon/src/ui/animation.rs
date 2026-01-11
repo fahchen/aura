@@ -73,19 +73,29 @@ pub fn ease_in_out(t: f32) -> f32 {
     }
 }
 
+/// Quadratic ease-out: decelerates to zero velocity
+pub fn ease_out(t: f32) -> f32 {
+    1.0 - (1.0 - t).powi(2)
+}
+
+/// Reset animation duration in milliseconds
+pub const RESET_DURATION_MS: u64 = 300;
+
+/// Monaco 13px monospace font: base unit width
+pub const MARQUEE_CHAR_WIDTH: f32 = 7.8;
+/// Separator: 4 spaces
+pub const MARQUEE_SEPARATOR_CHARS: usize = 4;
+/// Separator width for seamless marquee
+pub const MARQUEE_SEPARATOR_WIDTH: f32 = MARQUEE_SEPARATOR_CHARS as f32 * MARQUEE_CHAR_WIDTH;
+
 /// Calculate marquee scroll offset for text that overflows its container.
 /// Returns the x-offset in pixels (negative = scrolled left).
 ///
-/// The animation cycles:
-/// 1. Start at 0 (text aligned left)
-/// 2. Pause for MARQUEE_PAUSE_MS
-/// 3. Scroll left until overflow is visible (right side of text)
-/// 4. Pause for MARQUEE_PAUSE_MS
-/// 5. Scroll back to start
-/// 6. Repeat
+/// For seamless scrolling, the text is rendered twice with a separator.
+/// We scroll by exactly (text_width + separator_width) to create a perfect loop.
 ///
 /// Arguments:
-/// - `text_width`: The full width of the text
+/// - `text_width`: The width of ONE copy of the text
 /// - `container_width`: The visible container width
 /// - `start_time`: When the animation started
 pub fn calculate_marquee_offset(text_width: f32, container_width: f32, start_time: Instant) -> f32 {
@@ -96,29 +106,14 @@ pub fn calculate_marquee_offset(text_width: f32, container_width: f32, start_tim
 
     let elapsed_ms = start_time.elapsed().as_millis() as u64;
 
-    // Calculate scroll duration based on overflow distance
-    let scroll_duration_ms = ((overflow / MARQUEE_SPEED_PX_PER_SEC) * 1000.0) as u64;
+    // Scroll distance = one copy + separator (seamless loop point)
+    let scroll_distance = text_width + MARQUEE_SEPARATOR_WIDTH;
+    let scroll_duration_ms = ((scroll_distance / MARQUEE_SPEED_PX_PER_SEC) * 1000.0) as u64;
 
-    // Total cycle: pause -> scroll left -> pause -> scroll right
-    let cycle_duration_ms = MARQUEE_PAUSE_MS + scroll_duration_ms + MARQUEE_PAUSE_MS + scroll_duration_ms;
-    let pos_in_cycle = elapsed_ms % cycle_duration_ms;
-
-    if pos_in_cycle < MARQUEE_PAUSE_MS {
-        // Initial pause (at left)
-        0.0
-    } else if pos_in_cycle < MARQUEE_PAUSE_MS + scroll_duration_ms {
-        // Scrolling left
-        let scroll_progress = (pos_in_cycle - MARQUEE_PAUSE_MS) as f32 / scroll_duration_ms as f32;
-        -overflow * ease_in_out(scroll_progress)
-    } else if pos_in_cycle < MARQUEE_PAUSE_MS + scroll_duration_ms + MARQUEE_PAUSE_MS {
-        // Pause at right (fully scrolled)
-        -overflow
-    } else {
-        // Scrolling back right
-        let scroll_progress = (pos_in_cycle - MARQUEE_PAUSE_MS - scroll_duration_ms - MARQUEE_PAUSE_MS) as f32
-            / scroll_duration_ms as f32;
-        -overflow * (1.0 - ease_in_out(scroll_progress))
-    }
+    // Continuous scroll - no pause
+    let pos_in_cycle = elapsed_ms % scroll_duration_ms;
+    let scroll_progress = pos_in_cycle as f32 / scroll_duration_ms as f32;
+    -scroll_progress * scroll_distance
 }
 
 #[cfg(test)]

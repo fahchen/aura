@@ -1,9 +1,13 @@
 //! HUD window management - session status display
 
-use super::animation::{calculate_animation_state, calculate_marquee_offset, ease_in_out};
+use super::animation::{
+    calculate_animation_state, calculate_marquee_offset, ease_in_out, ease_out,
+    MARQUEE_CHAR_WIDTH, RESET_DURATION_MS,
+};
 use super::icons;
 use aura_common::{RunningTool, SessionInfo, SessionState};
 use crate::registry::SessionRegistry;
+use unicode_width::UnicodeWidthStr;
 use gpui::{
     div, point, px, size, svg, App, AppContext, Application, AssetSource, Bounds, Context, Div,
     Entity, InteractiveElement, IntoElement, ParentElement, Render, Result as GpuiResult,
@@ -11,6 +15,7 @@ use gpui::{
     WindowBounds, WindowKind, WindowOptions,
 };
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -58,6 +63,23 @@ const ICON_SIZE: f32 = 16.0;
 /// Collapse delay in milliseconds
 const COLLAPSE_DELAY_MS: u128 = 3000;
 
+/// Animation state for a session row's marquee
+#[derive(Clone)]
+enum RowMarqueeState {
+    /// Not scrolling, at offset 0
+    Idle,
+    /// Scrolling while hovered
+    Scrolling { start: Instant },
+    /// Resetting back to offset 0 with ease animation
+    Resetting { start: Instant, from_offset: f32 },
+}
+
+impl Default for RowMarqueeState {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
 /// HUD view showing session rows
 struct HudView {
     state: Entity<HudStateModel>,
@@ -69,6 +91,8 @@ struct HudView {
     collapse_signal: Arc<AtomicBool>,
     /// Last known session count (for resize detection)
     last_session_count: usize,
+    /// Per-row marquee animation state (session_id -> state)
+    row_states: HashMap<String, RowMarqueeState>,
 }
 
 impl HudView {
@@ -113,7 +137,147 @@ impl HudView {
         }
     }
 
+    /// Clean up completed reset animations by transitioning Resetting -> Idle
+    fn cleanup_completed_resets(&mut self) {
+        let reset_duration = std::time::Duration::from_millis(RESET_DURATION_MS);
+        for state in self.row_states.values_mut() {
+            if let RowMarqueeState::Resetting { start, .. } = state {
+                if start.elapsed() >= reset_duration {
+                    *state = RowMarqueeState::Idle;
+                }
+            }
+        }
+    }
+
+    /// Handle hover state change for a session row's marquee animation
+    fn handle_row_hover(&mut self, session_id: String, hovered: bool, _cx: &mut Context<Self>) {
+        if hovered {
+            // Start scrolling
+            self.row_states.insert(
+                session_id,
+                RowMarqueeState::Scrolling {
+                    start: Instant::now(),
+                },
+            );
+        } else {
+            // Calculate current offset and start reset animation
+            if let Some(state) = self.row_states.get(&session_id) {
+                let from_offset = match state {
+                    RowMarqueeState::Scrolling { start } => {
+                        // Need to calculate where we are in the scroll
+                        // We don't have text_width here, so we'll store a sentinel
+                        // and calculate the actual offset in render
+                        let elapsed = start.elapsed();
+                        // Store elapsed time as a proxy - we'll calculate real offset in render
+                        -(elapsed.as_secs_f32() * MARQUEE_SPEED_PX_PER_SEC)
+                    }
+                    RowMarqueeState::Resetting { from_offset, .. } => *from_offset,
+                    RowMarqueeState::Idle => 0.0,
+                };
+                self.row_states.insert(
+                    session_id,
+                    RowMarqueeState::Resetting {
+                        start: Instant::now(),
+                        from_offset,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Render a session row with hover-based marquee scrolling
+    fn render_session_row(
+        &self,
+        session: &SessionInfo,
+        tool_index: usize,
+        fade_progress: f32,
+        marquee_state: RowMarqueeState,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<Div> {
+        let state_color = state_to_color(session.state);
+        let session_name = extract_session_name(&session.cwd);
+        let session_id = session.session_id.clone();
+
+        // Use unicode-width for accurate width calculation (CJK = 2 units, ASCII = 1 unit)
+        let display_width = session_name.width();
+        let estimated_text_width = display_width as f32 * MARQUEE_CHAR_WIDTH;
+        let needs_marquee = estimated_text_width > SESSION_NAME_WIDTH;
+
+        // Calculate marquee offset based on state
+        let (marquee_offset, is_scrolling) = match &marquee_state {
+            RowMarqueeState::Idle => (0.0, false),
+            RowMarqueeState::Scrolling { start } if needs_marquee => (
+                calculate_marquee_offset(estimated_text_width, SESSION_NAME_WIDTH, *start),
+                true,
+            ),
+            RowMarqueeState::Scrolling { .. } => (0.0, false),
+            RowMarqueeState::Resetting { start, from_offset } => {
+                let elapsed = start.elapsed().as_millis() as f32;
+                let progress = (elapsed / RESET_DURATION_MS as f32).min(1.0);
+                let eased = ease_out(progress);
+                (from_offset * (1.0 - eased), false)
+            }
+        };
+
+        div()
+            .id(SharedString::from(format!("session-row-{}", session_id)))
+            .w_full()
+            .h(px(ROW_HEIGHT))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(8.0))
+            .rounded(px(6.0))
+            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                this.handle_row_hover(session_id.clone(), *hovered, cx);
+            }))
+            // Status dot column (fixed width)
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .w(px(STATUS_DOT_WIDTH))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(div().size(px(10.0)).rounded_full().bg(state_color)),
+            )
+            // Session name column (fixed width with seamless marquee)
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .w(px(SESSION_NAME_WIDTH))
+                    .h_full()
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .ml(px(marquee_offset))
+                            .font_family("Maple Mono NF CN")
+                            .text_size(px(13.0))
+                            .text_color(gpui::rgb(0xFFFFFF))
+                            .whitespace_nowrap()
+                            .child(if needs_marquee && is_scrolling {
+                                // Two copies for seamless loop when scrolling
+                                format!("{}    {}", session_name, session_name)
+                            } else {
+                                session_name
+                            }),
+                    ),
+            )
+            // Current tool (flex-1, takes remaining space)
+            .child(render_current_tool(
+                &session.running_tools,
+                tool_index,
+                fade_progress,
+            ))
+    }
 }
+
+/// Constant for marquee scroll speed (imported from animation module)
+const MARQUEE_SPEED_PX_PER_SEC: f32 = super::animation::MARQUEE_SPEED_PX_PER_SEC;
 
 impl Render for HudView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -133,6 +297,9 @@ impl Render for HudView {
         self.state.update(cx, |state, _cx| {
             state.refresh_from_registry();
         });
+
+        // Clean up completed reset animations (Resetting -> Idle when done)
+        self.cleanup_completed_resets();
 
         let hud_state = self.state.read(cx);
         let sessions = &hud_state.sessions;
@@ -182,14 +349,17 @@ impl Render for HudView {
                     .flex_col()
                     .gap(px(ROW_GAP))
                     .p(px(6.0))
-                    .rounded_bl(px(8.0))
-                    .rounded_br(px(8.0))
-                    .bg(gpui::rgba(0x000000CC))
-                    .children(
-                        sessions_for_render
-                            .iter()
-                            .map(|session| render_session_row(session, tool_index, fade_progress, animation_start)),
-                    )
+                    .rounded(px(8.0))
+                    .bg(gpui::rgba(0x000000BB))
+                    .children(sessions_for_render.iter().map(|session| {
+                        let session_id = session.session_id.clone();
+                        let marquee_state = self
+                            .row_states
+                            .get(&session_id)
+                            .cloned()
+                            .unwrap_or_default();
+                        self.render_session_row(session, tool_index, fade_progress, marquee_state, cx)
+                    }))
             } else {
                 // Collapsed view: two icons
                 div()
@@ -200,9 +370,8 @@ impl Render for HudView {
                     .justify_center()
                     .gap(px(8.0))
                     .p(px(6.0))
-                    .rounded_bl(px(8.0))
-                    .rounded_br(px(8.0))
-                    .bg(gpui::rgba(0x000000CC))
+                    .rounded(px(8.0))
+                    .bg(gpui::rgba(0x000000BB))
                     // Left icon: attention indicator
                     .child(render_status_icon(has_attention))
                     // Right icon: aggregate state
@@ -261,76 +430,6 @@ fn render_aggregate_icon(state: SessionState) -> Div {
 /// Fixed column widths for table-style layout
 const STATUS_DOT_WIDTH: f32 = 18.0; // Status dot column (10px dot + padding)
 const SESSION_NAME_WIDTH: f32 = 80.0; // Fixed session name column
-
-/// Render a session row: status dot + session name + current tool
-/// Uses table-style layout with fixed column widths for alignment
-fn render_session_row(
-    session: &SessionInfo,
-    tool_index: usize,
-    fade_progress: f32,
-    animation_start: Instant,
-) -> Div {
-    let state_color = state_to_color(session.state);
-    let session_name = extract_session_name(&session.cwd);
-
-    // Estimate text width (rough approximation: 7px per char at 13px font size)
-    let estimated_text_width = session_name.len() as f32 * 7.0;
-    let needs_marquee = estimated_text_width > SESSION_NAME_WIDTH;
-
-    // Calculate marquee offset if text overflows
-    let marquee_offset = if needs_marquee {
-        calculate_marquee_offset(estimated_text_width, SESSION_NAME_WIDTH, animation_start)
-    } else {
-        0.0
-    };
-
-    div()
-        .w_full()
-        .h(px(ROW_HEIGHT))
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(8.0))
-        .px(px(8.0))
-        .rounded(px(6.0))
-        .bg(gpui::rgba(0xFFFFFF11)) // Subtle row background
-        // Status dot column (fixed width)
-        .child(
-            div()
-                .flex_shrink_0()
-                .w(px(STATUS_DOT_WIDTH))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .size(px(10.0))
-                        .rounded_full()
-                        .bg(state_color),
-                ),
-        )
-        // Session name column (fixed width with marquee scrolling)
-        .child(
-            div()
-                .flex_shrink_0()
-                .w(px(SESSION_NAME_WIDTH))
-                .h_full()
-                .overflow_hidden()
-                .child(
-                    div()
-                        .h_full()
-                        .flex()
-                        .items_center()
-                        .ml(px(marquee_offset))
-                        .text_size(px(13.0))
-                        .text_color(gpui::rgb(0xFFFFFF))
-                        .whitespace_nowrap()
-                        .child(session_name),
-                ),
-        )
-        // Current tool (flex-1, takes remaining space)
-        .child(render_current_tool(&session.running_tools, tool_index, fade_progress))
-}
 
 
 /// Create RGBA color with specified alpha (0.0 to 1.0)
@@ -455,6 +554,11 @@ use std::time::Instant;
 /// Call from main thread only.
 pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>) {
     Application::new().with_assets(Assets).run(|app: &mut App| {
+        // Register embedded Maple Mono font for consistent marquee rendering
+        let font_data = include_bytes!("../../assets/fonts/MapleMono-NF-CN-Regular.ttf");
+        app.text_system()
+            .add_fonts(vec![Cow::Borrowed(font_data.as_slice())])
+            .expect("Failed to load Maple Mono font");
         // Get primary display for positioning
         let displays = app.displays();
         let primary = displays.first().expect("No display found");
@@ -503,7 +607,7 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>) {
                 kind: WindowKind::PopUp,
                 is_movable: true,
                 is_resizable: false,
-                window_background: WindowBackgroundAppearance::Blurred,
+                window_background: WindowBackgroundAppearance::Transparent,
                 ..Default::default()
             },
             |_window, app| {
@@ -514,6 +618,7 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>) {
                     hover_left_at: None,
                     collapse_signal: Arc::new(AtomicBool::new(false)),
                     last_session_count: 0,
+                    row_states: HashMap::new(),
                 })
             },
         )
