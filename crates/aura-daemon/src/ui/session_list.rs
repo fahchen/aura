@@ -111,26 +111,34 @@ pub fn render_current_tool(
     let current_opacity = 1.0 - progress; // fades out
     let next_opacity = progress; // fades in
 
+    // Slide animation offsets
+    let slide_distance = ROW_HEIGHT * 0.6;
+    let current_y_offset = -progress * slide_distance; // slides up
+    let next_y_offset = (1.0 - progress) * slide_distance; // slides down from above
+
     // Stack both tools with cross-fade opacity using a relative container
     div()
         .flex_1()
         .h_full()
         .relative()
+        .overflow_hidden()
         .text_size(px(12.0))
-        // Current tool (fading out)
+        // Current tool (fading out, sliding up)
         .child(
             div()
                 .absolute()
                 .inset_0()
+                .top(px(current_y_offset))
                 .flex()
                 .items_center()
                 .child(render_tool_with_icon(current_tool, current_opacity * 0.8)),
         )
-        // Next tool (fading in)
+        // Next tool (fading in, sliding down from above)
         .child(
             div()
                 .absolute()
                 .inset_0()
+                .top(px(next_y_offset))
                 .flex()
                 .items_center()
                 .child(render_tool_with_icon(next_tool, next_opacity * 0.8)),
