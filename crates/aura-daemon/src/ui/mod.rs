@@ -90,30 +90,23 @@ impl HudView {
         cx.notify();
     }
 
-    fn set_hovered(&mut self, hovered: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.is_hovered = hovered;
-
-        if hovered {
-            // Mouse entered - expand if there are sessions
-            self.hover_left_at = None;
-            let has_sessions = !self.state.read(cx).sessions.is_empty();
-            if has_sessions {
-                self.set_expanded(true, window, cx);
-            }
-        } else {
-            // Mouse left - record time for delayed collapse
-            self.hover_left_at = Some(Instant::now());
+    /// Derive whether we should be expanded based on current state
+    fn should_be_expanded(&self, has_sessions: bool) -> bool {
+        if !has_sessions {
+            return false;
         }
-    }
 
-    /// Check if collapse delay has elapsed and collapse if so
-    fn check_collapse_delay(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_hovered {
+            return true;
+        }
+
         if let Some(left_at) = self.hover_left_at {
-            if left_at.elapsed() >= COLLAPSE_DELAY {
-                self.hover_left_at = None;
-                self.set_expanded(false, window, cx);
+            if left_at.elapsed() < COLLAPSE_DELAY {
+                return true;
             }
         }
+
+        false
     }
 
     /// Clean up completed reset animations by transitioning Resetting -> Idle
@@ -237,13 +230,37 @@ impl Render for HudView {
         // Request continuous animation frames (for smooth animation + registry polling)
         window.request_animation_frame();
 
-        // Check if collapse delay has elapsed
-        self.check_collapse_delay(window, cx);
-
         // Refresh sessions from registry on each frame
         self.state.update(cx, |state, _cx| {
             state.refresh_from_registry();
         });
+
+        // Update hover state from window (on_hover events don't fire when mouse leaves window)
+        let window_hovered = window.is_window_hovered();
+        if window_hovered != self.is_hovered {
+            if window_hovered {
+                // Mouse entered
+                self.hover_left_at = None;
+            } else {
+                // Mouse left - start collapse delay
+                self.hover_left_at = Some(Instant::now());
+            }
+            self.is_hovered = window_hovered;
+        }
+
+        // Derive and apply expansion state
+        let has_sessions = !self.state.read(cx).sessions.is_empty();
+        let should_expand = self.should_be_expanded(has_sessions);
+        if should_expand != self.is_expanded {
+            self.set_expanded(should_expand, window, cx);
+        }
+
+        // Clean up stale hover_left_at
+        if let Some(left_at) = self.hover_left_at {
+            if left_at.elapsed() >= COLLAPSE_DELAY {
+                self.hover_left_at = None;
+            }
+        }
 
         // Clean up completed reset animations (Resetting -> Idle when done)
         self.cleanup_completed_resets();
@@ -273,9 +290,6 @@ impl Render for HudView {
             .id("hud-container")
             .size_full()
             .cursor_pointer()
-            .on_hover(cx.listener(|this, hovered: &bool, window, cx| {
-                this.set_hovered(*hovered, window, cx);
-            }))
             .child(if is_expanded && !sessions_for_render.is_empty() {
                 // Expanded view: full session list with glass background
                 div()
