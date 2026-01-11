@@ -153,6 +153,7 @@ mod tests {
             session_id: "s1".into(),
             tool_id: "t1".into(),
             tool_name: "Read".into(),
+            tool_label: Some("main.rs".into()),
         };
         let response = handle_message(IpcMessage::Event(tool_event), &registry);
 
@@ -181,6 +182,7 @@ mod tests {
                 session_id: "s1".into(),
                 tool_id: "t1".into(),
                 tool_name: "Read".into(),
+                tool_label: None,
             }),
             &registry,
         );

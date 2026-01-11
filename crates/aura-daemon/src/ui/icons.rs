@@ -139,3 +139,24 @@ pub fn tool_icon_path(tool_name: &str) -> &'static str {
     }
 }
 
+/// Get Nerd Font glyph for a tool name
+pub fn tool_nerd_icon(tool_name: &str) -> &'static str {
+    match tool_name {
+        "Bash" => "\u{e795}",            // nf-dev-terminal
+        "Read" => "\u{f441}",            // nf-oct-file_code
+        "Edit" => "\u{f044}",            // nf-fa-pencil_square_o
+        "Write" => "\u{f15c}",           // nf-fa-file_text (file-plus alternative)
+        "Glob" => "\u{f413}",            // nf-oct-file_directory
+        "Grep" => "\u{f002}",            // nf-fa-search
+        "WebFetch" => "\u{f0ac}",        // nf-fa-globe
+        "WebSearch" => "\u{eb8b}",       // nf-cod-search
+        "Task" => "\u{f1b3}",            // nf-fa-cubes
+        "TodoWrite" => "\u{f0ae}",       // nf-fa-tasks
+        "LSP" => "\u{ea95}",             // nf-cod-symbol_method
+        "NotebookEdit" => "\u{e606}",    // nf-seti-notebook
+        "AskUserQuestion" => "\u{f128}", // nf-fa-question
+        name if name.starts_with("mcp__") => "\u{f1e6}", // nf-fa-plug
+        _ => "\u{f013}",                 // nf-fa-gear
+    }
+}
+

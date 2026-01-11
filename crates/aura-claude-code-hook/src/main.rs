@@ -143,10 +143,12 @@ mod tests {
                 session_id,
                 tool_id,
                 tool_name,
+                tool_label,
             } => {
                 assert_eq!(session_id, "s1");
                 assert_eq!(tool_id, "toolu_abc123");
                 assert_eq!(tool_name, "Read");
+                assert_eq!(tool_label, None);
             }
             _ => panic!("Expected ToolStarted event"),
         }

@@ -8,11 +8,11 @@
 use super::animation::{ease_in_out, ease_out, MARQUEE_CHAR_WIDTH, RESET_DURATION_MS};
 use super::icons;
 use aura_common::{RunningTool, SessionState};
-use gpui::{div, px, svg, Div, ParentElement, Styled};
+use gpui::{div, px, Div, ParentElement, Styled};
 use unicode_width::UnicodeWidthStr;
 
 /// Session list dimensions
-pub const WIDTH: f32 = 200.0;
+pub const WIDTH: f32 = 242.0; // STATUS_DOT + NAME + TOOL + gaps(16) + padding(16)
 pub const ROW_HEIGHT: f32 = 32.0;
 pub const ROW_GAP: f32 = 4.0;
 pub const MAX_SESSIONS: usize = 5;
@@ -20,6 +20,7 @@ pub const MAX_SESSIONS: usize = 5;
 /// Column widths for table-style layout
 pub const STATUS_DOT_WIDTH: f32 = 18.0;
 pub const SESSION_NAME_WIDTH: f32 = 80.0;
+pub const TOOL_COLUMN_WIDTH: f32 = 112.0; // ~√2× SESSION_NAME_WIDTH
 
 /// Render the content of a session row (status dot + name + tool)
 ///
@@ -74,7 +75,7 @@ pub fn render_row_content(
                         .items_center()
                         .ml(px(marquee_offset))
                         .font_family("Maple Mono NF CN")
-                        .text_size(px(13.0))
+                        .text_size(px(14.0))
                         .text_color(gpui::rgb(0x1a1a1a)) // Dark text for glass background
                         .whitespace_nowrap()
                         .child(if needs_marquee && is_scrolling {
@@ -97,14 +98,14 @@ pub fn render_current_tool(
     fade_progress: f32,
 ) -> Div {
     if tools.is_empty() {
-        return div().flex_1();
+        return div().flex_shrink_0().w(px(TOOL_COLUMN_WIDTH));
     }
 
     // Get current and next tool indices
     let current_idx = tool_index % tools.len();
     let next_idx = (tool_index + 1) % tools.len();
-    let current_tool = &tools[current_idx].tool_name;
-    let next_tool = &tools[next_idx].tool_name;
+    let current_tool = &tools[current_idx];
+    let next_tool = &tools[next_idx];
 
     // Apply easing to fade progress
     let progress = ease_in_out(fade_progress);
@@ -118,7 +119,8 @@ pub fn render_current_tool(
 
     // Stack both tools with cross-fade opacity using a relative container
     div()
-        .flex_1()
+        .flex_shrink_0()
+        .w(px(TOOL_COLUMN_WIDTH))
         .h_full()
         .relative()
         .overflow_hidden()
@@ -131,7 +133,8 @@ pub fn render_current_tool(
                 .top(px(current_y_offset))
                 .flex()
                 .items_center()
-                .child(render_tool_with_icon(current_tool, current_opacity * 0.8)),
+                .opacity(current_opacity)
+                .child(render_tool_with_icon(current_tool)),
         )
         // Next tool (fading in, sliding down from above)
         .child(
@@ -141,32 +144,56 @@ pub fn render_current_tool(
                 .top(px(next_y_offset))
                 .flex()
                 .items_center()
-                .child(render_tool_with_icon(next_tool, next_opacity * 0.8)),
+                .opacity(next_opacity)
+                .child(render_tool_with_icon(next_tool)),
         )
 }
 
-/// Render a tool with its Lucide icon
-pub fn render_tool_with_icon(tool_name: &str, opacity: f32) -> Div {
-    let icon_path = icons::tool_icon_path(tool_name);
-    let color = rgba_with_alpha(opacity);
+/// Icon width for consistent alignment (Nerd Font icons vary in width)
+const TOOL_ICON_WIDTH: f32 = 16.0;
+/// Max characters for tool label display (approximate fit for column width)
+const TOOL_LABEL_MAX_CHARS: usize = 12;
+
+/// Truncate string with "..." suffix if too long
+fn truncate_label(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_string()
+    } else {
+        format!("{}...", s.chars().take(max_chars.saturating_sub(3)).collect::<String>())
+    }
+}
+
+/// Dimmed color for tool display
+const TOOL_COLOR: u32 = 0x303030FF; // Dark gray
+
+/// Render a tool with its Nerd Font icon
+pub fn render_tool_with_icon(tool: &RunningTool) -> Div {
+    let icon = icons::tool_nerd_icon(&tool.tool_name);
+    let display_text = tool.tool_label.as_deref().unwrap_or(&tool.tool_name);
+    let truncated = truncate_label(display_text, TOOL_LABEL_MAX_CHARS);
 
     div()
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(6.0))
-        .child(svg().path(icon_path).size(px(14.0)).text_color(color))
-        .child(div().text_color(color).child(tool_name.to_string()))
-}
-
-/// Create dark RGBA color with specified alpha (0.0 to 1.0) for glass background
-fn rgba_with_alpha(alpha: f32) -> gpui::Rgba {
-    // Dark gray color (0x1a1a1a) with alpha for glass background contrast
-    let r = 0x1a;
-    let g = 0x1a;
-    let b = 0x1a;
-    let a = (alpha * 255.0) as u32;
-    gpui::rgba((r << 24) | (g << 16) | (b << 8) | a)
+        .gap(px(1.0))
+        .max_w(px(TOOL_COLUMN_WIDTH))
+        .overflow_hidden()
+        .font_family("Maple Mono NF CN")
+        .text_color(gpui::rgba(TOOL_COLOR))
+        .child(
+            div()
+                .flex_shrink_0()
+                .w(px(TOOL_ICON_WIDTH))
+                .text_size(px(12.0))
+                .child(icon),
+        )
+        .child(
+            div()
+                .text_size(px(12.0))
+                .whitespace_nowrap()
+                .child(truncated),
+        )
 }
 
 /// Extract session name from cwd (last folder name)

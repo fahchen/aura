@@ -53,6 +53,7 @@ pub struct SessionInfo {
 pub struct RunningTool {
     pub tool_id: String,
     pub tool_name: String,
+    pub tool_label: Option<String>,
 }
 
 #[cfg(test)]
@@ -137,6 +138,7 @@ mod tests {
             running_tools: vec![RunningTool {
                 tool_id: "t1".into(),
                 tool_name: "Read".into(),
+                tool_label: Some("main.rs".into()),
             }],
         };
 

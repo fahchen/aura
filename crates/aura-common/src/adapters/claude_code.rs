@@ -167,6 +167,79 @@ pub fn parse_hook(json: &str) -> Result<HookEvent, serde_json::Error> {
     serde_json::from_str(json)
 }
 
+/// Extract a human-readable label from tool_input JSON
+pub fn extract_tool_label(tool_name: &str, tool_input: Option<&Value>) -> Option<String> {
+    // Handle MCP tools first (they don't need input)
+    if tool_name.starts_with("mcp__") {
+        return Some(tool_name.rsplit("__").next().unwrap_or(tool_name).to_string());
+    }
+
+    let input = tool_input?;
+
+    match tool_name {
+        "Bash" => input
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(extract_bash_label),
+        "Read" | "Edit" | "Write" => input
+            .get("file_path")
+            .and_then(|v| v.as_str())
+            .map(extract_filename),
+        "Glob" => input
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        "Grep" => input
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .map(|s| truncate_string(s, 15)),
+        "Task" => input
+            .get("subagent_type")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        "WebFetch" => input
+            .get("url")
+            .and_then(|v| v.as_str())
+            .and_then(extract_domain),
+        "WebSearch" => input
+            .get("query")
+            .and_then(|v| v.as_str())
+            .map(|s| truncate_string(s, 15)),
+        _ => None,
+    }
+}
+
+fn extract_bash_label(command: &str) -> String {
+    let parts: Vec<&str> = command.split_whitespace().take(3).collect();
+    truncate_string(&parts.join(" "), 20)
+}
+
+fn extract_filename(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn extract_domain(url: &str) -> Option<String> {
+    url.split("://")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .map(|domain| domain.to_string())
+}
+
+fn truncate_string(s: &str, max_len: usize) -> String {
+    if s.chars().count() <= max_len {
+        s.to_string()
+    } else {
+        format!(
+            "{}…",
+            s.chars().take(max_len.saturating_sub(1)).collect::<String>()
+        )
+    }
+}
+
 /// Convert HookEvent to AgentEvent
 impl From<HookEvent> for AgentEvent {
     fn from(hook: HookEvent) -> Self {
@@ -179,11 +252,15 @@ impl From<HookEvent> for AgentEvent {
             HookEvent::UserPromptSubmit(p) => AgentEvent::Activity {
                 session_id: p.common.session_id,
             },
-            HookEvent::PreToolUse(p) => AgentEvent::ToolStarted {
-                session_id: p.common.session_id,
-                tool_id: p.tool_use_id,
-                tool_name: p.tool_name,
-            },
+            HookEvent::PreToolUse(p) => {
+                let tool_label = extract_tool_label(&p.tool_name, p.tool_input.as_ref());
+                AgentEvent::ToolStarted {
+                    session_id: p.common.session_id,
+                    tool_id: p.tool_use_id,
+                    tool_name: p.tool_name,
+                    tool_label,
+                }
+            }
             HookEvent::PostToolUse(p) => AgentEvent::ToolCompleted {
                 session_id: p.common.session_id,
                 tool_id: p.tool_use_id,
@@ -259,7 +336,8 @@ mod tests {
             "cwd": "/tmp",
             "hook_event_name": "PreToolUse",
             "tool_name": "Read",
-            "tool_use_id": "toolu_01ABC"
+            "tool_use_id": "toolu_01ABC",
+            "tool_input": {"file_path": "/path/to/config.rs"}
         }"#;
 
         let hook = parse_hook(json).unwrap();
@@ -270,10 +348,12 @@ mod tests {
                 session_id,
                 tool_id,
                 tool_name,
+                tool_label,
             } => {
                 assert_eq!(session_id, "abc123");
                 assert_eq!(tool_id, "toolu_01ABC");
                 assert_eq!(tool_name, "Read");
+                assert_eq!(tool_label, Some("config.rs".into()));
             }
             _ => panic!("Expected ToolStarted"),
         }
@@ -462,5 +542,82 @@ mod tests {
             }
             _ => panic!("Expected Activity"),
         }
+    }
+
+    #[test]
+    fn extract_tool_label_bash() {
+        // Bash extracts first 3 words and truncates to 20 chars
+        let input = serde_json::json!({"command": "cargo build"});
+        let label = extract_tool_label("Bash", Some(&input));
+        assert_eq!(label, Some("cargo build".into()));
+
+        // Long command should be truncated at 20 chars
+        let input = serde_json::json!({"command": "cargo build --release"});
+        let label = extract_tool_label("Bash", Some(&input));
+        // "cargo build --release" is 21 chars, should be truncated
+        assert_eq!(label, Some("cargo build --relea\u{2026}".into()));
+
+        // Very long command - only first 3 words considered
+        let input = serde_json::json!({"command": "very-long-command with lots of arguments and flags"});
+        let label = extract_tool_label("Bash", Some(&input));
+        assert!(label.as_ref().map(|s| s.chars().count()).unwrap_or(0) <= 20);
+    }
+
+    #[test]
+    fn extract_tool_label_file_ops() {
+        let input = serde_json::json!({"file_path": "/Users/test/project/src/main.rs"});
+
+        assert_eq!(extract_tool_label("Read", Some(&input)), Some("main.rs".into()));
+        assert_eq!(extract_tool_label("Edit", Some(&input)), Some("main.rs".into()));
+        assert_eq!(extract_tool_label("Write", Some(&input)), Some("main.rs".into()));
+    }
+
+    #[test]
+    fn extract_tool_label_glob() {
+        let input = serde_json::json!({"pattern": "**/*.rs"});
+        assert_eq!(extract_tool_label("Glob", Some(&input)), Some("**/*.rs".into()));
+    }
+
+    #[test]
+    fn extract_tool_label_grep() {
+        // Pattern is exactly 15 chars - should not be truncated
+        let input = serde_json::json!({"pattern": "fn extract_tool"});
+        assert_eq!(extract_tool_label("Grep", Some(&input)), Some("fn extract_tool".into()));
+
+        // Pattern > 15 chars - should be truncated
+        let input = serde_json::json!({"pattern": "fn extract_tool_label"});
+        assert_eq!(extract_tool_label("Grep", Some(&input)), Some("fn extract_too\u{2026}".into()));
+
+        // Short pattern should not be truncated
+        let input = serde_json::json!({"pattern": "TODO"});
+        assert_eq!(extract_tool_label("Grep", Some(&input)), Some("TODO".into()));
+    }
+
+    #[test]
+    fn extract_tool_label_web() {
+        let input = serde_json::json!({"url": "https://docs.rs/tokio/latest"});
+        assert_eq!(extract_tool_label("WebFetch", Some(&input)), Some("docs.rs".into()));
+
+        let input = serde_json::json!({"query": "rust async await patterns"});
+        assert_eq!(extract_tool_label("WebSearch", Some(&input)), Some("rust async awa…".into()));
+    }
+
+    #[test]
+    fn extract_tool_label_mcp() {
+        assert_eq!(
+            extract_tool_label("mcp__memory__memory_search", None),
+            Some("memory_search".into())
+        );
+        assert_eq!(
+            extract_tool_label("mcp__notion__notion-fetch", None),
+            Some("notion-fetch".into())
+        );
+    }
+
+    #[test]
+    fn extract_tool_label_none_for_unknown() {
+        let input = serde_json::json!({"some_field": "value"});
+        assert_eq!(extract_tool_label("UnknownTool", Some(&input)), None);
+        assert_eq!(extract_tool_label("Read", None), None);
     }
 }

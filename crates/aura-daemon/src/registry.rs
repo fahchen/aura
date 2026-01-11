@@ -12,6 +12,7 @@ const MIN_TOOL_DISPLAY: Duration = Duration::from_secs(1);
 #[derive(Debug, Clone)]
 pub struct RecentTool {
     pub tool_name: String,
+    pub tool_label: Option<String>,
     pub expires_at: Instant,
 }
 
@@ -56,6 +57,7 @@ impl Session {
                 .map(|t| RunningTool {
                     tool_id: format!("recent_{}", t.tool_name),
                     tool_name: t.tool_name.clone(),
+                    tool_label: t.tool_label.clone(),
                 }),
         );
 
@@ -124,12 +126,15 @@ impl SessionRegistry {
                 session_id,
                 tool_id,
                 tool_name,
+                tool_label,
             } => {
                 debug!(%session_id, %tool_name, "tool started");
                 let session = self.get_or_create_session(&session_id, None);
                 session.touch();
                 session.state = SessionState::Running;
-                session.running_tools.push(RunningTool { tool_id, tool_name });
+                session
+                    .running_tools
+                    .push(RunningTool { tool_id, tool_name, tool_label });
             }
 
             AgentEvent::ToolCompleted {
@@ -144,6 +149,7 @@ impl SessionRegistry {
                     let tool = session.running_tools.remove(pos);
                     session.recent_tools.push(RecentTool {
                         tool_name: tool.tool_name,
+                        tool_label: tool.tool_label,
                         expires_at: Instant::now() + MIN_TOOL_DISPLAY,
                     });
                 }
@@ -237,6 +243,7 @@ mod tests {
             session_id: "s1".into(),
             tool_id: "t1".into(),
             tool_name: "Read".into(),
+            tool_label: Some("config.rs".into()),
         });
         let sessions = registry.get_all();
         assert_eq!(sessions[0].running_tools.len(), 1);
@@ -317,11 +324,13 @@ mod tests {
             session_id: "s1".into(),
             tool_id: "t1".into(),
             tool_name: "Read".into(),
+            tool_label: Some("main.rs".into()),
         });
         registry.process_event(AgentEvent::ToolStarted {
             session_id: "s1".into(),
             tool_id: "t2".into(),
             tool_name: "Bash".into(),
+            tool_label: Some("cargo build".into()),
         });
 
         let sessions = registry.get_all();
@@ -353,6 +362,7 @@ mod tests {
             session_id: "late".into(),
             tool_id: "t1".into(),
             tool_name: "Read".into(),
+            tool_label: None,
         });
 
         assert_eq!(registry.len(), 1);
@@ -377,6 +387,7 @@ mod tests {
             session_id: "s1".into(),
             tool_id: "t1".into(),
             tool_name: "Read".into(),
+            tool_label: Some("test.rs".into()),
         });
         registry.process_event(AgentEvent::ToolCompleted {
             session_id: "s1".into(),
@@ -411,6 +422,7 @@ mod tests {
             let session = registry.sessions.get_mut("s1").unwrap();
             session.recent_tools.push(RecentTool {
                 tool_name: "OldTool".into(),
+                tool_label: None,
                 expires_at: Instant::now() - Duration::from_secs(10),
             });
         }

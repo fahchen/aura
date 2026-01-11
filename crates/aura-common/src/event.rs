@@ -37,6 +37,7 @@ pub enum AgentEvent {
         session_id: String,
         tool_id: String,
         tool_name: String,
+        tool_label: Option<String>,
     },
     /// Tool execution completed
     ToolCompleted { session_id: String, tool_id: String },
@@ -88,6 +89,7 @@ mod tests {
                 session_id: "s3".into(),
                 tool_id: "t1".into(),
                 tool_name: "Read".into(),
+                tool_label: None,
             },
             AgentEvent::ToolCompleted {
                 session_id: "s4".into(),
@@ -119,6 +121,7 @@ mod tests {
             session_id: "abc123".into(),
             tool_id: "toolu_01".into(),
             tool_name: "Read".into(),
+            tool_label: Some("config.rs".into()),
         };
 
         let json = serde_json::to_string(&event).unwrap();
