@@ -154,12 +154,32 @@ const TOOL_ICON_WIDTH: f32 = 16.0;
 /// Max characters for tool label display (approximate fit for column width)
 const TOOL_LABEL_MAX_CHARS: usize = 12;
 
-/// Truncate string with "..." suffix if too long
+/// Truncate string intelligently based on content type
+/// - Paths: truncate prefix ("...filename.rs")
+/// - Commands/text: truncate suffix ("cargo bui...")
 fn truncate_label(s: &str, max_chars: usize) -> String {
-    if s.chars().count() <= max_chars {
-        s.to_string()
+    let char_count = s.chars().count();
+    if char_count <= max_chars {
+        return s.to_string();
+    }
+
+    // Path detection: contains path separator
+    let is_path = s.contains('/') || s.contains('\\');
+
+    if is_path {
+        // For paths: truncate prefix, keep filename/end portion
+        let chars: Vec<char> = s.chars().collect();
+        let keep_chars = max_chars.saturating_sub(3); // Reserve 3 for "..."
+        let start = char_count - keep_chars;
+        format!("...{}", chars[start..].iter().collect::<String>())
     } else {
-        format!("{}...", s.chars().take(max_chars.saturating_sub(3)).collect::<String>())
+        // For commands/text: truncate suffix
+        format!(
+            "{}...",
+            s.chars()
+                .take(max_chars.saturating_sub(3))
+                .collect::<String>()
+        )
     }
 }
 

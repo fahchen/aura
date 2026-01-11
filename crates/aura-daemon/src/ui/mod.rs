@@ -85,7 +85,7 @@ impl HudView {
             (COLLAPSED_WIDTH, COLLAPSED_HEIGHT)
         };
 
-        // Resize window (keeps top-left position, so expanded will grow to the right)
+        // Resize window
         window.resize(size(px(width), px(height)));
         cx.notify();
     }
@@ -94,14 +94,14 @@ impl HudView {
         self.is_hovered = hovered;
 
         if hovered {
-            // Mouse entered - expand only if there are sessions to show
+            // Mouse entered - expand if there are sessions
             self.hover_left_at = None;
             let has_sessions = !self.state.read(cx).sessions.is_empty();
             if has_sessions {
                 self.set_expanded(true, window, cx);
             }
         } else {
-            // Mouse left - record time for delayed collapse (checked in render)
+            // Mouse left - record time for delayed collapse
             self.hover_left_at = Some(Instant::now());
         }
     }
