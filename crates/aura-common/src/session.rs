@@ -53,36 +53,6 @@ impl SessionState {
     }
 }
 
-/// SVG icon name for tools
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolIcon {
-    Robot,
-    Terminal,
-    Folder,
-    Search,
-    Book,
-    Pencil,
-    File,
-    Globe,
-    Plug,
-    Gear,
-}
-
-/// Get SVG icon for a tool name
-pub fn tool_icon(tool_name: &str) -> ToolIcon {
-    match tool_name {
-        "Task" => ToolIcon::Robot,
-        "Bash" => ToolIcon::Terminal,
-        "Glob" => ToolIcon::Folder,
-        "Grep" => ToolIcon::Search,
-        "Read" => ToolIcon::Book,
-        "Edit" => ToolIcon::Pencil,
-        "Write" => ToolIcon::File,
-        "WebFetch" | "WebSearch" => ToolIcon::Globe,
-        name if name.starts_with("mcp__") => ToolIcon::Plug,
-        _ => ToolIcon::Gear,
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -104,22 +74,6 @@ mod tests {
         assert_eq!(SessionState::Attention.color(), "#EAB308");
         assert_eq!(SessionState::Compacting.color(), "#A855F7");
         assert_eq!(SessionState::Stale.color(), "#6B7280");
-    }
-
-    #[test]
-    fn tool_icons() {
-        assert_eq!(tool_icon("Task"), ToolIcon::Robot);
-        assert_eq!(tool_icon("Bash"), ToolIcon::Terminal);
-        assert_eq!(tool_icon("Glob"), ToolIcon::Folder);
-        assert_eq!(tool_icon("Grep"), ToolIcon::Search);
-        assert_eq!(tool_icon("Read"), ToolIcon::Book);
-        assert_eq!(tool_icon("Edit"), ToolIcon::Pencil);
-        assert_eq!(tool_icon("Write"), ToolIcon::File);
-        assert_eq!(tool_icon("WebFetch"), ToolIcon::Globe);
-        assert_eq!(tool_icon("WebSearch"), ToolIcon::Globe);
-        assert_eq!(tool_icon("mcp__notion__search"), ToolIcon::Plug);
-        assert_eq!(tool_icon("mcp__memory__add"), ToolIcon::Plug);
-        assert_eq!(tool_icon("UnknownTool"), ToolIcon::Gear);
     }
 
     #[test]

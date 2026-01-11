@@ -3,8 +3,6 @@
 //! Icons from Lucide (https://lucide.dev), 24x24 viewBox
 //! Rendered at 16x16px in the HUD
 
-use gpui::Hsla;
-
 /// Icon colors (from design spec)
 pub mod colors {
     use gpui::Hsla;
@@ -133,23 +131,3 @@ pub fn tool_icon_path(tool_name: &str) -> &'static str {
     }
 }
 
-/// Get left icon info (attention indicator)
-pub fn left_icon(has_attention: bool) -> (&'static str, Hsla) {
-    if has_attention {
-        (paths::BELL, colors::YELLOW)
-    } else {
-        (paths::CHECK, colors::GREEN)
-    }
-}
-
-/// Get right icon info (aggregate state)
-pub fn right_icon(state: super::state::AggregateState) -> (&'static str, Hsla) {
-    use super::state::AggregateState;
-
-    match state {
-        AggregateState::Running => (paths::SQUARE, colors::GREEN), // Placeholder, matrix used instead
-        AggregateState::Compacting => (paths::ROTATE_CW, colors::PURPLE),
-        AggregateState::Idle => (paths::SQUARE, colors::BLUE),
-        AggregateState::Stale => (paths::PAUSE, colors::GRAY),
-    }
-}

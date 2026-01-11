@@ -4,8 +4,8 @@
 //! - Left: Attention bell (yellow) or Check (green)
 //! - Right: State icon (Running/Compacting/Idle/Stale)
 
+mod animation;
 mod icons;
-mod state;
 mod window;
 
 use crate::registry::SessionRegistry;

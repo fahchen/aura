@@ -1,5 +1,6 @@
 //! HUD window management - session status display
 
+use super::animation::{calculate_animation_state, calculate_marquee_offset, ease_in_out};
 use super::icons;
 use aura_common::{RunningTool, SessionInfo, SessionState};
 use crate::registry::SessionRegistry;
@@ -146,8 +147,9 @@ impl Render for HudView {
         }
 
         // Calculate animation state (shared across all sessions for sync switching)
+        let animation_start = hud_state.animation_start;
         let (tool_index, fade_progress) =
-            calculate_animation_state(hud_state.animation_start, hud_state.animation_seed);
+            calculate_animation_state(animation_start, hud_state.animation_seed);
 
         if sessions.is_empty() {
             return div().id("hud-empty").size_full();
@@ -186,7 +188,7 @@ impl Render for HudView {
                     .children(
                         sessions_for_render
                             .iter()
-                            .map(|session| render_session_row(session, tool_index, fade_progress)),
+                            .map(|session| render_session_row(session, tool_index, fade_progress, animation_start)),
                     )
             } else {
                 // Collapsed view: two icons
@@ -256,10 +258,31 @@ fn render_aggregate_icon(state: SessionState) -> Div {
         .child(svg().path(icon_path).size(px(ICON_SIZE)).text_color(color))
 }
 
+/// Fixed column widths for table-style layout
+const STATUS_DOT_WIDTH: f32 = 18.0; // Status dot column (10px dot + padding)
+const SESSION_NAME_WIDTH: f32 = 80.0; // Fixed session name column
+
 /// Render a session row: status dot + session name + current tool
-fn render_session_row(session: &SessionInfo, tool_index: usize, fade_progress: f32) -> Div {
+/// Uses table-style layout with fixed column widths for alignment
+fn render_session_row(
+    session: &SessionInfo,
+    tool_index: usize,
+    fade_progress: f32,
+    animation_start: Instant,
+) -> Div {
     let state_color = state_to_color(session.state);
     let session_name = extract_session_name(&session.cwd);
+
+    // Estimate text width (rough approximation: 7px per char at 13px font size)
+    let estimated_text_width = session_name.len() as f32 * 7.0;
+    let needs_marquee = estimated_text_width > SESSION_NAME_WIDTH;
+
+    // Calculate marquee offset if text overflows
+    let marquee_offset = if needs_marquee {
+        calculate_marquee_offset(estimated_text_width, SESSION_NAME_WIDTH, animation_start)
+    } else {
+        0.0
+    };
 
     div()
         .w_full()
@@ -271,36 +294,44 @@ fn render_session_row(session: &SessionInfo, tool_index: usize, fade_progress: f
         .px(px(8.0))
         .rounded(px(6.0))
         .bg(gpui::rgba(0xFFFFFF11)) // Subtle row background
-        // Status dot
-        .child(
-            div()
-                .size(px(10.0))
-                .rounded_full()
-                .bg(state_color),
-        )
-        // Session name (auto-width, max 80px)
+        // Status dot column (fixed width)
         .child(
             div()
                 .flex_shrink_0()
-                .max_w(px(80.0))
-                .text_size(px(13.0))
-                .text_color(gpui::rgb(0xFFFFFF))
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .child(session_name),
+                .w(px(STATUS_DOT_WIDTH))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .size(px(10.0))
+                        .rounded_full()
+                        .bg(state_color),
+                ),
         )
-        // Current tool (cycles through tools with cross-fade)
+        // Session name column (fixed width with marquee scrolling)
+        .child(
+            div()
+                .flex_shrink_0()
+                .w(px(SESSION_NAME_WIDTH))
+                .h_full()
+                .overflow_hidden()
+                .child(
+                    div()
+                        .h_full()
+                        .flex()
+                        .items_center()
+                        .ml(px(marquee_offset))
+                        .text_size(px(13.0))
+                        .text_color(gpui::rgb(0xFFFFFF))
+                        .whitespace_nowrap()
+                        .child(session_name),
+                ),
+        )
+        // Current tool (flex-1, takes remaining space)
         .child(render_current_tool(&session.running_tools, tool_index, fade_progress))
 }
 
-/// Quadratic ease-in-out function
-fn ease_in_out(t: f32) -> f32 {
-    if t < 0.5 {
-        2.0 * t * t
-    } else {
-        1.0 - (-2.0 * t + 2.0).powi(2) / 2.0
-    }
-}
 
 /// Create RGBA color with specified alpha (0.0 to 1.0)
 fn rgba_with_alpha(alpha: f32) -> gpui::Rgba {
@@ -416,65 +447,7 @@ impl HudStateModel {
 }
 
 
-/// Animation timing constants
-const CYCLE_DURATION_MIN_MS: u64 = 1500; // Min time showing each tool
-const CYCLE_DURATION_MAX_MS: u64 = 2000; // Max time showing each tool
-const FADE_DURATION_MS: u64 = 500; // Cross-fade duration
-
 use std::time::Instant;
-
-/// Simple hash function for deterministic pseudo-random per cycle
-fn cycle_hash(cycle: u64, seed: u64) -> u64 {
-    // Combine cycle and seed, then apply multiplicative hash
-    let mut x = (cycle ^ seed).wrapping_mul(0x517cc1b727220a95);
-    x ^= x >> 32;
-    x
-}
-
-/// Get randomized cycle duration for a specific cycle number and seed
-fn get_cycle_duration(cycle: u64, seed: u64) -> u64 {
-    let hash = cycle_hash(cycle, seed);
-    let range = CYCLE_DURATION_MAX_MS - CYCLE_DURATION_MIN_MS;
-    CYCLE_DURATION_MIN_MS + (hash % (range + 1))
-}
-
-/// Calculate animation state based on elapsed time
-/// Returns (tool_index, fade_progress)
-fn calculate_animation_state(start_time: Instant, seed: u64) -> (usize, f32) {
-    let elapsed_ms = start_time.elapsed().as_millis() as u64;
-
-    // Find which cycle we're in by iterating (since durations vary)
-    let mut accumulated_ms: u64 = 0;
-    let mut cycle: u64 = 0;
-
-    loop {
-        let cycle_duration = get_cycle_duration(cycle, seed);
-        let total_cycle_ms = cycle_duration + FADE_DURATION_MS;
-
-        if accumulated_ms + total_cycle_ms > elapsed_ms {
-            // We're in this cycle
-            let pos_in_cycle = elapsed_ms - accumulated_ms;
-
-            if pos_in_cycle < cycle_duration {
-                // Showing current tool (no fade)
-                return (cycle as usize, 0.0);
-            } else {
-                // Fading to next tool
-                let fade_elapsed = pos_in_cycle - cycle_duration;
-                let progress = (fade_elapsed as f32) / (FADE_DURATION_MS as f32);
-                return (cycle as usize, progress.min(1.0));
-            }
-        }
-
-        accumulated_ms += total_cycle_ms;
-        cycle += 1;
-
-        // Safety limit to prevent infinite loop
-        if cycle > 10000 {
-            return (cycle as usize, 0.0);
-        }
-    }
-}
 
 /// Run the HUD application
 ///

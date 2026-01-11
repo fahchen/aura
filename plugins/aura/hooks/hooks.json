@@ -57,6 +57,17 @@
         ]
       }
     ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "aura-claude-code-hook",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

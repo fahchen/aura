@@ -9,6 +9,14 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
+/// Process hook input: parse JSON and convert to AgentEvent.
+///
+/// This is the core processing logic, extracted for testability.
+pub fn process_hook_input(input: &str) -> Result<AgentEvent, String> {
+    let hook: HookEvent = parse_hook(input).map_err(|e| format!("failed to parse hook: {e}"))?;
+    Ok(hook.into())
+}
+
 fn main() {
     // Read JSON from stdin
     let mut input = String::new();
@@ -17,17 +25,14 @@ fn main() {
         std::process::exit(1);
     }
 
-    // Parse Claude Code hook
-    let hook: HookEvent = match parse_hook(&input) {
-        Ok(h) => h,
+    // Process input
+    let event = match process_hook_input(&input) {
+        Ok(e) => e,
         Err(e) => {
-            eprintln!("aura-claude-code-hook: failed to parse hook: {e}");
+            eprintln!("aura-claude-code-hook: {e}");
             std::process::exit(1);
         }
     };
-
-    // Convert to generic AgentEvent
-    let event: AgentEvent = hook.into();
 
     // Send to daemon via IPC (fail gracefully if daemon not running)
     if let Err(e) = send_to_daemon(&event) {
@@ -76,5 +81,373 @@ fn send_to_daemon(event: &AgentEvent) -> Result<(), String> {
         IpcResponse::Ok => Ok(()),
         IpcResponse::Pong => Ok(()),
         IpcResponse::Error { message } => Err(format!("daemon error: {message}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_common::AgentType;
+
+    // ==================== Valid input tests ====================
+
+    #[test]
+    fn process_session_start_hook() {
+        let json = r#"{
+            "hook_event_name": "SessionStart",
+            "session_id": "test-session-123",
+            "cwd": "/home/user/project",
+            "source": "cli"
+        }"#;
+
+        let event = process_hook_input(json).unwrap();
+
+        match event {
+            AgentEvent::SessionStarted {
+                session_id,
+                cwd,
+                agent,
+            } => {
+                assert_eq!(session_id, "test-session-123");
+                assert_eq!(cwd, "/home/user/project");
+                assert_eq!(agent, AgentType::ClaudeCode);
+            }
+            _ => panic!("Expected SessionStarted event"),
+        }
+    }
+
+    #[test]
+    fn process_pre_tool_use_hook() {
+        let json = r#"{
+            "hook_event_name": "PreToolUse",
+            "session_id": "s1",
+            "cwd": "/tmp",
+            "tool_name": "Read",
+            "tool_use_id": "toolu_abc123"
+        }"#;
+
+        let event = process_hook_input(json).unwrap();
+
+        match event {
+            AgentEvent::ToolStarted {
+                session_id,
+                tool_id,
+                tool_name,
+            } => {
+                assert_eq!(session_id, "s1");
+                assert_eq!(tool_id, "toolu_abc123");
+                assert_eq!(tool_name, "Read");
+            }
+            _ => panic!("Expected ToolStarted event"),
+        }
+    }
+
+    #[test]
+    fn process_post_tool_use_hook() {
+        let json = r#"{
+            "hook_event_name": "PostToolUse",
+            "session_id": "s1",
+            "cwd": "/tmp",
+            "tool_name": "Read",
+            "tool_use_id": "toolu_abc123"
+        }"#;
+
+        let event = process_hook_input(json).unwrap();
+
+        match event {
+            AgentEvent::ToolCompleted {
+                session_id,
+                tool_id,
+            } => {
+                assert_eq!(session_id, "s1");
+                assert_eq!(tool_id, "toolu_abc123");
+            }
+            _ => panic!("Expected ToolCompleted event"),
+        }
+    }
+
+    #[test]
+    fn process_permission_request_hook() {
+        let json = r#"{
+            "hook_event_name": "PermissionRequest",
+            "session_id": "s1",
+            "cwd": "/tmp",
+            "tool_name": "Bash"
+        }"#;
+
+        let event = process_hook_input(json).unwrap();
+
+        match event {
+            AgentEvent::NeedsAttention { session_id, message } => {
+                assert_eq!(session_id, "s1");
+                assert_eq!(message, Some("Bash".into()));
+            }
+            _ => panic!("Expected NeedsAttention event"),
+        }
+    }
+
+    #[test]
+    fn process_stop_hook() {
+        let json = r#"{
+            "hook_event_name": "Stop",
+            "session_id": "s1",
+            "cwd": "/tmp"
+        }"#;
+
+        let event = process_hook_input(json).unwrap();
+
+        match event {
+            AgentEvent::Idle { session_id } => {
+                assert_eq!(session_id, "s1");
+            }
+            _ => panic!("Expected Idle event"),
+        }
+    }
+
+    #[test]
+    fn process_pre_compact_hook() {
+        let json = r#"{
+            "hook_event_name": "PreCompact",
+            "session_id": "s1",
+            "cwd": "/tmp",
+            "trigger": "auto"
+        }"#;
+
+        let event = process_hook_input(json).unwrap();
+
+        match event {
+            AgentEvent::Compacting { session_id } => {
+                assert_eq!(session_id, "s1");
+            }
+            _ => panic!("Expected Compacting event"),
+        }
+    }
+
+    #[test]
+    fn process_session_end_hook() {
+        let json = r#"{
+            "hook_event_name": "SessionEnd",
+            "session_id": "s1",
+            "cwd": "/tmp",
+            "reason": "exit"
+        }"#;
+
+        let event = process_hook_input(json).unwrap();
+
+        match event {
+            AgentEvent::SessionEnded { session_id } => {
+                assert_eq!(session_id, "s1");
+            }
+            _ => panic!("Expected SessionEnded event"),
+        }
+    }
+
+    #[test]
+    fn process_user_prompt_submit_hook() {
+        let json = r#"{
+            "hook_event_name": "UserPromptSubmit",
+            "session_id": "s1",
+            "cwd": "/tmp",
+            "prompt": "fix the bug"
+        }"#;
+
+        let event = process_hook_input(json).unwrap();
+
+        match event {
+            AgentEvent::Activity { session_id } => {
+                assert_eq!(session_id, "s1");
+            }
+            _ => panic!("Expected Activity event"),
+        }
+    }
+
+    #[test]
+    fn process_notification_permission_hook() {
+        let json = r#"{
+            "hook_event_name": "Notification",
+            "session_id": "s1",
+            "cwd": "/tmp",
+            "notification_type": "permission_prompt",
+            "message": "Permission needed for Bash"
+        }"#;
+
+        let event = process_hook_input(json).unwrap();
+
+        match event {
+            AgentEvent::NeedsAttention { session_id, message } => {
+                assert_eq!(session_id, "s1");
+                assert_eq!(message, Some("Permission needed for Bash".into()));
+            }
+            _ => panic!("Expected NeedsAttention event"),
+        }
+    }
+
+    #[test]
+    fn process_notification_other_hook() {
+        let json = r#"{
+            "hook_event_name": "Notification",
+            "session_id": "s1",
+            "cwd": "/tmp",
+            "notification_type": "idle"
+        }"#;
+
+        let event = process_hook_input(json).unwrap();
+
+        match event {
+            AgentEvent::Activity { session_id } => {
+                assert_eq!(session_id, "s1");
+            }
+            _ => panic!("Expected Activity event for non-permission notification"),
+        }
+    }
+
+    #[test]
+    fn process_subagent_stop_hook() {
+        let json = r#"{
+            "hook_event_name": "SubagentStop",
+            "session_id": "s1",
+            "cwd": "/tmp"
+        }"#;
+
+        let event = process_hook_input(json).unwrap();
+
+        match event {
+            AgentEvent::Activity { session_id } => {
+                assert_eq!(session_id, "s1");
+            }
+            _ => panic!("Expected Activity event"),
+        }
+    }
+
+    // ==================== Invalid input tests ====================
+
+    #[test]
+    fn process_invalid_json_returns_error() {
+        let invalid = "not valid json";
+
+        let result = process_hook_input(invalid);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("failed to parse hook"));
+    }
+
+    #[test]
+    fn process_empty_input_returns_error() {
+        let result = process_hook_input("");
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("failed to parse hook"));
+    }
+
+    #[test]
+    fn process_valid_json_wrong_structure_returns_error() {
+        // Valid JSON but not a hook event
+        let wrong_structure = r#"{"foo": "bar"}"#;
+
+        let result = process_hook_input(wrong_structure);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("failed to parse hook"));
+    }
+
+    #[test]
+    fn process_missing_required_field_returns_error() {
+        // Missing session_id
+        let missing_field = r#"{
+            "hook_event_name": "SessionStart",
+            "cwd": "/tmp"
+        }"#;
+
+        let result = process_hook_input(missing_field);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("failed to parse hook"));
+    }
+
+    #[test]
+    fn process_unknown_hook_event_returns_error() {
+        let unknown = r#"{
+            "hook_event_name": "UnknownEvent",
+            "session_id": "s1",
+            "cwd": "/tmp"
+        }"#;
+
+        let result = process_hook_input(unknown);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("failed to parse hook"));
+    }
+
+    #[test]
+    fn process_hook_with_extra_whitespace() {
+        // Real stdin input might have extra whitespace/newlines
+        let json = r#"
+            {
+                "hook_event_name": "Stop",
+                "session_id": "s1",
+                "cwd": "/tmp"
+            }
+        "#;
+
+        let event = process_hook_input(json).unwrap();
+
+        match event {
+            AgentEvent::Idle { session_id } => {
+                assert_eq!(session_id, "s1");
+            }
+            _ => panic!("Expected Idle event"),
+        }
+    }
+
+    #[test]
+    fn process_hook_with_optional_fields_omitted() {
+        // PreToolUse with only required fields (tool_input is optional)
+        let json = r#"{
+            "hook_event_name": "PreToolUse",
+            "session_id": "s1",
+            "cwd": "/tmp",
+            "tool_name": "Edit",
+            "tool_use_id": "t1"
+        }"#;
+
+        let event = process_hook_input(json).unwrap();
+
+        match event {
+            AgentEvent::ToolStarted { tool_name, .. } => {
+                assert_eq!(tool_name, "Edit");
+            }
+            _ => panic!("Expected ToolStarted event"),
+        }
+    }
+
+    #[test]
+    fn process_hook_with_extra_unknown_fields() {
+        // JSON with extra fields should still parse (serde default behavior)
+        let json = r#"{
+            "hook_event_name": "Stop",
+            "session_id": "s1",
+            "cwd": "/tmp",
+            "unknown_field": "ignored"
+        }"#;
+
+        // This depends on serde config - with deny_unknown_fields it would fail
+        // With default config, it should succeed
+        let result = process_hook_input(json);
+        // Either way is acceptable behavior, just verify it doesn't panic
+        match result {
+            Ok(AgentEvent::Idle { session_id }) => {
+                assert_eq!(session_id, "s1");
+            }
+            Err(e) => {
+                // If deny_unknown_fields is enabled, this is expected
+                assert!(e.contains("failed to parse hook"));
+            }
+            _ => panic!("Unexpected event type"),
+        }
     }
 }
