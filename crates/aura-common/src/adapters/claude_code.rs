@@ -274,17 +274,16 @@ impl From<HookEvent> for AgentEvent {
                 message: p.tool_name,
             },
             HookEvent::Notification(p) => {
-                if p.notification_type.as_deref() == Some("permission_prompt") {
-                    AgentEvent::NeedsAttention {
+                match p.notification_type.as_deref() {
+                    Some("permission_prompt") | Some("idle_prompt") => AgentEvent::NeedsAttention {
                         session_id: p.common.session_id,
                         cwd: p.common.cwd,
                         message: p.message,
-                    }
-                } else {
-                    AgentEvent::Activity {
+                    },
+                    _ => AgentEvent::Activity {
                         session_id: p.common.session_id,
                         cwd: p.common.cwd,
-                    }
+                    },
                 }
             }
             HookEvent::Stop(p) => AgentEvent::Idle {
@@ -439,7 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_notification_other() {
+    fn parse_notification_idle_prompt() {
         let json = r#"{
             "session_id": "abc123",
             "cwd": "/tmp",
@@ -451,10 +450,30 @@ mod tests {
         let event: AgentEvent = hook.into();
 
         match event {
+            AgentEvent::NeedsAttention { session_id, .. } => {
+                assert_eq!(session_id, "abc123");
+            }
+            _ => panic!("Expected NeedsAttention for idle_prompt"),
+        }
+    }
+
+    #[test]
+    fn parse_notification_other() {
+        let json = r#"{
+            "session_id": "abc123",
+            "cwd": "/tmp",
+            "hook_event_name": "Notification",
+            "notification_type": "auth_success"
+        }"#;
+
+        let hook = parse_hook(json).unwrap();
+        let event: AgentEvent = hook.into();
+
+        match event {
             AgentEvent::Activity { session_id, .. } => {
                 assert_eq!(session_id, "abc123");
             }
-            _ => panic!("Expected Activity for non-permission notification"),
+            _ => panic!("Expected Activity for non-attention notification"),
         }
     }
 
