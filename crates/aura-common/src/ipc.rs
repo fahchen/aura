@@ -46,6 +46,9 @@ pub struct SessionInfo {
     pub cwd: String,
     pub state: SessionState,
     pub running_tools: Vec<RunningTool>,
+    /// Custom session name (if set by user)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// A currently running tool
@@ -140,6 +143,7 @@ mod tests {
                 tool_name: "Read".into(),
                 tool_label: Some("main.rs".into()),
             }],
+            name: None,
         };
 
         let json = serde_json::to_string(&info).unwrap();

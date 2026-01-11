@@ -167,6 +167,27 @@ pub fn parse_hook(json: &str) -> Result<HookEvent, serde_json::Error> {
     serde_json::from_str(json)
 }
 
+/// Label extraction strategy for a tool
+enum LabelExtractor {
+    /// Extract from a field, apply transformation
+    Field(&'static str, fn(&str) -> String),
+    /// Extract domain from URL field
+    Domain(&'static str),
+}
+
+/// Tool name to label extraction mapping
+const TOOL_LABEL_EXTRACTORS: &[(&str, LabelExtractor)] = &[
+    ("Bash", LabelExtractor::Field("command", extract_bash_label)),
+    ("Read", LabelExtractor::Field("file_path", extract_filename)),
+    ("Edit", LabelExtractor::Field("file_path", extract_filename)),
+    ("Write", LabelExtractor::Field("file_path", extract_filename)),
+    ("Glob", LabelExtractor::Field("pattern", str::to_string)),
+    ("Grep", LabelExtractor::Field("pattern", |s| truncate_string(s, 15))),
+    ("Task", LabelExtractor::Field("subagent_type", str::to_string)),
+    ("WebFetch", LabelExtractor::Domain("url")),
+    ("WebSearch", LabelExtractor::Field("query", |s| truncate_string(s, 15))),
+];
+
 /// Extract a human-readable label from tool_input JSON
 pub fn extract_tool_label(tool_name: &str, tool_input: Option<&Value>) -> Option<String> {
     // Handle MCP tools first (they don't need input)
@@ -176,36 +197,20 @@ pub fn extract_tool_label(tool_name: &str, tool_input: Option<&Value>) -> Option
 
     let input = tool_input?;
 
-    match tool_name {
-        "Bash" => input
-            .get("command")
+    // Find matching extractor
+    let (_, extractor) = TOOL_LABEL_EXTRACTORS
+        .iter()
+        .find(|(name, _)| *name == tool_name)?;
+
+    match extractor {
+        LabelExtractor::Field(field, transform) => input
+            .get(*field)
             .and_then(|v| v.as_str())
-            .map(extract_bash_label),
-        "Read" | "Edit" | "Write" => input
-            .get("file_path")
-            .and_then(|v| v.as_str())
-            .map(extract_filename),
-        "Glob" => input
-            .get("pattern")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        "Grep" => input
-            .get("pattern")
-            .and_then(|v| v.as_str())
-            .map(|s| truncate_string(s, 15)),
-        "Task" => input
-            .get("subagent_type")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        "WebFetch" => input
-            .get("url")
+            .map(transform),
+        LabelExtractor::Domain(field) => input
+            .get(*field)
             .and_then(|v| v.as_str())
             .and_then(extract_domain),
-        "WebSearch" => input
-            .get("query")
-            .and_then(|v| v.as_str())
-            .map(|s| truncate_string(s, 15)),
-        _ => None,
     }
 }
 
@@ -240,6 +245,30 @@ fn truncate_string(s: &str, max_len: usize) -> String {
     }
 }
 
+/// Parse `aura set-name "..."` command from a Bash command string.
+///
+/// Returns `Some(name)` if the command is an `aura set-name` invocation,
+/// otherwise `None`.
+pub fn parse_aura_set_name_command(command: &str) -> Option<String> {
+    let trimmed = command.trim();
+    let rest = trimmed.strip_prefix("aura set-name ")?;
+    let rest = rest.trim();
+
+    // Handle quoted strings (single or double quotes)
+    if (rest.starts_with('"') && rest.ends_with('"'))
+        || (rest.starts_with('\'') && rest.ends_with('\''))
+    {
+        if rest.len() >= 2 {
+            Some(rest[1..rest.len() - 1].to_string())
+        } else {
+            None
+        }
+    } else {
+        // Unquoted: use the rest as the name
+        Some(rest.to_string())
+    }
+}
+
 /// Convert HookEvent to AgentEvent
 impl From<HookEvent> for AgentEvent {
     fn from(hook: HookEvent) -> Self {
@@ -254,6 +283,18 @@ impl From<HookEvent> for AgentEvent {
                 cwd: p.common.cwd,
             },
             HookEvent::PreToolUse(p) => {
+                // Check if this is an `aura set-name` command
+                if p.tool_name == "Bash" {
+                    if let Some(command) = p.tool_input.as_ref().and_then(|v| v.get("command")).and_then(|v| v.as_str()) {
+                        if let Some(name) = parse_aura_set_name_command(command) {
+                            return AgentEvent::SessionNameUpdated {
+                                session_id: p.common.session_id,
+                                name,
+                            };
+                        }
+                    }
+                }
+
                 let tool_label = extract_tool_label(&p.tool_name, p.tool_input.as_ref());
                 AgentEvent::ToolStarted {
                     session_id: p.common.session_id,
@@ -649,5 +690,91 @@ mod tests {
         let input = serde_json::json!({"some_field": "value"});
         assert_eq!(extract_tool_label("UnknownTool", Some(&input)), None);
         assert_eq!(extract_tool_label("Read", None), None);
+    }
+
+    // ==================== aura set-name command parsing ====================
+
+    #[test]
+    fn parse_aura_set_name_double_quoted() {
+        assert_eq!(
+            parse_aura_set_name_command("aura set-name \"My Task\""),
+            Some("My Task".into())
+        );
+    }
+
+    #[test]
+    fn parse_aura_set_name_single_quoted() {
+        assert_eq!(
+            parse_aura_set_name_command("aura set-name 'Implementing Feature X'"),
+            Some("Implementing Feature X".into())
+        );
+    }
+
+    #[test]
+    fn parse_aura_set_name_unquoted() {
+        assert_eq!(
+            parse_aura_set_name_command("aura set-name MyTask"),
+            Some("MyTask".into())
+        );
+    }
+
+    #[test]
+    fn parse_aura_set_name_with_whitespace() {
+        assert_eq!(
+            parse_aura_set_name_command("  aura set-name \"Test\"  "),
+            Some("Test".into())
+        );
+    }
+
+    #[test]
+    fn parse_aura_set_name_not_matching() {
+        assert_eq!(parse_aura_set_name_command("cargo build"), None);
+        assert_eq!(parse_aura_set_name_command("aura status"), None);
+        assert_eq!(parse_aura_set_name_command("echo 'aura set-name test'"), None);
+    }
+
+    #[test]
+    fn pre_tool_use_aura_set_name_returns_session_name_updated() {
+        let json = r#"{
+            "session_id": "abc123",
+            "cwd": "/tmp",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_01ABC",
+            "tool_input": {"command": "aura set-name \"Fix Auth Bug\""}
+        }"#;
+
+        let hook = parse_hook(json).unwrap();
+        let event: AgentEvent = hook.into();
+
+        match event {
+            AgentEvent::SessionNameUpdated { session_id, name } => {
+                assert_eq!(session_id, "abc123");
+                assert_eq!(name, "Fix Auth Bug");
+            }
+            _ => panic!("Expected SessionNameUpdated event, got {:?}", event),
+        }
+    }
+
+    #[test]
+    fn pre_tool_use_regular_bash_not_affected() {
+        let json = r#"{
+            "session_id": "abc123",
+            "cwd": "/tmp",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_01ABC",
+            "tool_input": {"command": "cargo build"}
+        }"#;
+
+        let hook = parse_hook(json).unwrap();
+        let event: AgentEvent = hook.into();
+
+        match event {
+            AgentEvent::ToolStarted { tool_name, .. } => {
+                assert_eq!(tool_name, "Bash");
+            }
+            _ => panic!("Expected ToolStarted event, got {:?}", event),
+        }
     }
 }

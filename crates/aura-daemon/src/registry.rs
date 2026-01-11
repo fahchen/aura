@@ -8,6 +8,9 @@ use tracing::{debug, info, trace};
 /// Minimum duration to keep completed tools visible
 const MIN_TOOL_DISPLAY: Duration = Duration::from_secs(1);
 
+/// Prefix for recent tool IDs in the visible tools list
+const RECENT_TOOL_PREFIX: &str = "recent_";
+
 /// A tool that was recently completed but should remain visible briefly
 #[derive(Debug, Clone)]
 pub struct RecentTool {
@@ -26,6 +29,8 @@ pub struct Session {
     pub running_tools: Vec<RunningTool>,
     pub recent_tools: Vec<RecentTool>,
     pub last_activity: Instant,
+    /// Custom session name (if set by user via `aura set-name`)
+    pub name: Option<String>,
 }
 
 impl Session {
@@ -38,6 +43,7 @@ impl Session {
             running_tools: Vec::new(),
             recent_tools: Vec::new(),
             last_activity: Instant::now(),
+            name: None,
         }
     }
 
@@ -55,7 +61,7 @@ impl Session {
                 .iter()
                 .filter(|t| t.expires_at > now)
                 .map(|t| RunningTool {
-                    tool_id: format!("recent_{}", t.tool_name),
+                    tool_id: format!("{}{}", RECENT_TOOL_PREFIX, t.tool_name),
                     tool_name: t.tool_name.clone(),
                     tool_label: t.tool_label.clone(),
                 }),
@@ -70,6 +76,7 @@ impl Session {
             cwd: self.cwd.clone(),
             state: self.state,
             running_tools: self.visible_tools(),
+            name: self.name.clone(),
         }
     }
 }
@@ -85,12 +92,17 @@ impl SessionRegistry {
         Self::default()
     }
 
-    /// Get existing session or create a new one (late registration)
-    fn get_or_create(&mut self, session_id: &str, cwd: &str) -> &mut Session {
-        self.sessions.entry(session_id.to_string()).or_insert_with(|| {
+    /// Get existing session or create a new one (late registration), update it, and touch.
+    fn update_session<F>(&mut self, session_id: &str, cwd: &str, updater: F)
+    where
+        F: FnOnce(&mut Session),
+    {
+        let session = self.sessions.entry(session_id.to_string()).or_insert_with(|| {
             info!(%session_id, %cwd, "late session registration");
             Session::new(session_id.to_string(), cwd.to_string(), AgentType::ClaudeCode)
-        })
+        });
+        session.touch();
+        updater(session);
     }
 
     /// Process an agent event and update session state
@@ -102,17 +114,17 @@ impl SessionRegistry {
                 agent,
             } => {
                 info!(%session_id, %cwd, ?agent, "session started");
-                let session = Session::new(session_id.clone(), cwd, agent);
-                self.sessions.insert(session_id, session);
+                self.sessions
+                    .insert(session_id.clone(), Session::new(session_id, cwd, agent));
             }
 
             AgentEvent::Activity { session_id, cwd } => {
                 trace!(%session_id, "activity");
-                let session = self.get_or_create(&session_id, &cwd);
-                session.touch();
-                if session.state == SessionState::Idle || session.state == SessionState::Stale {
-                    session.state = SessionState::Running;
-                }
+                self.update_session(&session_id, &cwd, |session| {
+                    if session.state == SessionState::Idle || session.state == SessionState::Stale {
+                        session.state = SessionState::Running;
+                    }
+                });
             }
 
             AgentEvent::ToolStarted {
@@ -123,10 +135,12 @@ impl SessionRegistry {
                 tool_label,
             } => {
                 debug!(%session_id, %tool_name, "tool started");
-                let session = self.get_or_create(&session_id, &cwd);
-                session.touch();
-                session.state = SessionState::Running;
-                session.running_tools.push(RunningTool { tool_id, tool_name, tool_label });
+                self.update_session(&session_id, &cwd, |session| {
+                    session.state = SessionState::Running;
+                    session
+                        .running_tools
+                        .push(RunningTool { tool_id, tool_name, tool_label });
+                });
             }
 
             AgentEvent::ToolCompleted {
@@ -135,47 +149,55 @@ impl SessionRegistry {
                 tool_id,
             } => {
                 debug!(%session_id, %tool_id, "tool completed");
-                let session = self.get_or_create(&session_id, &cwd);
-                session.touch();
-                if let Some(pos) = session.running_tools.iter().position(|t| t.tool_id == tool_id) {
-                    let tool = session.running_tools.remove(pos);
-                    session.recent_tools.push(RecentTool {
-                        tool_name: tool.tool_name,
-                        tool_label: tool.tool_label,
-                        expires_at: Instant::now() + MIN_TOOL_DISPLAY,
-                    });
-                }
+                self.update_session(&session_id, &cwd, |session| {
+                    if let Some(pos) =
+                        session.running_tools.iter().position(|t| t.tool_id == tool_id)
+                    {
+                        let tool = session.running_tools.remove(pos);
+                        session.recent_tools.push(RecentTool {
+                            tool_name: tool.tool_name,
+                            tool_label: tool.tool_label,
+                            expires_at: Instant::now() + MIN_TOOL_DISPLAY,
+                        });
+                    }
+                });
             }
 
             AgentEvent::NeedsAttention {
-                session_id,
-                cwd,
-                message: _,
+                session_id, cwd, ..
             } => {
                 info!(%session_id, "needs attention");
-                let session = self.get_or_create(&session_id, &cwd);
-                session.touch();
-                session.state = SessionState::Attention;
+                self.update_session(&session_id, &cwd, |session| {
+                    session.state = SessionState::Attention;
+                });
             }
 
             AgentEvent::Compacting { session_id, cwd } => {
                 info!(%session_id, "compacting");
-                let session = self.get_or_create(&session_id, &cwd);
-                session.touch();
-                session.state = SessionState::Compacting;
+                self.update_session(&session_id, &cwd, |session| {
+                    session.state = SessionState::Compacting;
+                });
             }
 
             AgentEvent::Idle { session_id, cwd } => {
                 debug!(%session_id, "idle");
-                let session = self.get_or_create(&session_id, &cwd);
-                session.touch();
-                session.state = SessionState::Idle;
-                session.running_tools.clear();
+                self.update_session(&session_id, &cwd, |session| {
+                    session.state = SessionState::Idle;
+                    session.running_tools.clear();
+                });
             }
 
             AgentEvent::SessionEnded { session_id } => {
                 info!(%session_id, "session ended");
                 self.sessions.remove(&session_id);
+            }
+
+            AgentEvent::SessionNameUpdated { session_id, name } => {
+                info!(%session_id, %name, "session name updated");
+                if let Some(session) = self.sessions.get_mut(&session_id) {
+                    session.name = Some(name);
+                    session.touch();
+                }
             }
         }
     }
@@ -251,7 +273,7 @@ mod tests {
         let sessions = registry.get_all();
         // Tool should still be visible due to MIN_TOOL_DISPLAY
         assert_eq!(sessions[0].running_tools.len(), 1);
-        assert!(sessions[0].running_tools[0].tool_id.starts_with("recent_"));
+        assert!(sessions[0].running_tools[0].tool_id.starts_with(RECENT_TOOL_PREFIX));
 
         // Idle
         registry.process_event(AgentEvent::Idle {
@@ -401,7 +423,7 @@ mod tests {
         let sessions = registry.get_all();
         assert_eq!(sessions[0].running_tools.len(), 1);
         assert_eq!(sessions[0].running_tools[0].tool_name, "Read");
-        assert!(sessions[0].running_tools[0].tool_id.starts_with("recent_"));
+        assert!(sessions[0].running_tools[0].tool_id.starts_with(RECENT_TOOL_PREFIX));
 
         // Verify the internal recent_tools has the expiration set
         let session = registry.sessions.get("s1").unwrap();

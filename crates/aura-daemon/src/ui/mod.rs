@@ -46,9 +46,10 @@ const COLLAPSE_DELAY: Duration = Duration::from_millis(3000);
 
 
 /// Animation state for a session row's marquee
-#[derive(Clone)]
+#[derive(Clone, Default)]
 enum RowMarqueeState {
     /// Not scrolling, at offset 0
+    #[default]
     Idle,
     /// Scrolling while hovered
     Scrolling { start: Instant },
@@ -56,9 +57,86 @@ enum RowMarqueeState {
     Resetting { start: Instant, from_offset: f32 },
 }
 
-impl Default for RowMarqueeState {
-    fn default() -> Self {
-        Self::Idle
+/// Manages per-row marquee animation state
+#[derive(Default)]
+struct MarqueeAnimator {
+    /// Per-row marquee animation state (session_id -> state)
+    row_states: HashMap<String, RowMarqueeState>,
+}
+
+impl MarqueeAnimator {
+    /// Clean up completed reset animations by transitioning Resetting -> Idle
+    fn cleanup_completed_resets(&mut self) {
+        let reset_duration = Duration::from_millis(RESET_DURATION_MS);
+        for state in self.row_states.values_mut() {
+            if let RowMarqueeState::Resetting { start, .. } = state
+                && start.elapsed() >= reset_duration
+            {
+                *state = RowMarqueeState::Idle;
+            }
+        }
+    }
+
+    /// Handle hover state change for a session row's marquee animation
+    fn handle_row_hover(&mut self, session_id: String, needs_marquee: bool, hovered: bool) {
+        if hovered && needs_marquee {
+            // Only start scrolling if text actually overflows
+            self.row_states.insert(
+                session_id,
+                RowMarqueeState::Scrolling {
+                    start: Instant::now(),
+                },
+            );
+        } else if !hovered {
+            // Only animate reset if we were actually scrolling
+            if let Some(RowMarqueeState::Scrolling { start }) = self.row_states.get(&session_id) {
+                let from_offset = -(start.elapsed().as_secs_f32() * MARQUEE_SPEED_PX_PER_SEC);
+                self.row_states.insert(
+                    session_id,
+                    RowMarqueeState::Resetting {
+                        start: Instant::now(),
+                        from_offset,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Calculate marquee offset and scrolling state for a session row
+    fn calculate_state(&self, session_id: &str, session_name: &str) -> (f32, bool) {
+        let marquee_state = self
+            .row_states
+            .get(session_id)
+            .cloned()
+            .unwrap_or_default();
+
+        // Use unicode-width for accurate width calculation
+        let display_width = session_name.width();
+        let estimated_text_width = display_width as f32 * MARQUEE_CHAR_WIDTH;
+        let needs_marquee = estimated_text_width > SESSION_NAME_WIDTH;
+
+        match &marquee_state {
+            RowMarqueeState::Idle => (0.0, false),
+            RowMarqueeState::Scrolling { start } if needs_marquee => (
+                calculate_marquee_offset(estimated_text_width, SESSION_NAME_WIDTH, *start),
+                true,
+            ),
+            RowMarqueeState::Scrolling { .. } => (0.0, false),
+            RowMarqueeState::Resetting { start, from_offset } => {
+                let offset = session_list::calculate_reset_offset(
+                    *from_offset,
+                    start.elapsed().as_millis(),
+                );
+                (offset, false)
+            }
+        }
+    }
+
+    /// Check if text needs marquee animation based on width
+    fn needs_marquee(session_name: &str) -> bool {
+        let display_width = session_name.width();
+        let estimated_text_width = display_width as f32 * MARQUEE_CHAR_WIDTH;
+        estimated_text_width > SESSION_NAME_WIDTH
     }
 }
 
@@ -71,8 +149,8 @@ struct HudView {
     hover_left_at: Option<Instant>,
     /// Last known session count (for resize detection)
     last_session_count: usize,
-    /// Per-row marquee animation state (session_id -> state)
-    row_states: HashMap<String, RowMarqueeState>,
+    /// Per-row marquee animation manager
+    marquee: MarqueeAnimator,
 }
 
 impl HudView {
@@ -114,83 +192,6 @@ impl HudView {
         }
     }
 
-    /// Clean up completed reset animations by transitioning Resetting -> Idle
-    fn cleanup_completed_resets(&mut self) {
-        let reset_duration = std::time::Duration::from_millis(RESET_DURATION_MS);
-        for state in self.row_states.values_mut() {
-            if let RowMarqueeState::Resetting { start, .. } = state {
-                if start.elapsed() >= reset_duration {
-                    *state = RowMarqueeState::Idle;
-                }
-            }
-        }
-    }
-
-    /// Handle hover state change for a session row's marquee animation
-    fn handle_row_hover(
-        &mut self,
-        session_id: String,
-        needs_marquee: bool,
-        hovered: bool,
-        _cx: &mut Context<Self>,
-    ) {
-        if hovered && needs_marquee {
-            // Only start scrolling if text actually overflows
-            self.row_states.insert(
-                session_id,
-                RowMarqueeState::Scrolling {
-                    start: Instant::now(),
-                },
-            );
-        } else if !hovered {
-            // Only animate reset if we were actually scrolling
-            if let Some(RowMarqueeState::Scrolling { start }) = self.row_states.get(&session_id) {
-                let from_offset = -(start.elapsed().as_secs_f32() * MARQUEE_SPEED_PX_PER_SEC);
-                self.row_states.insert(
-                    session_id,
-                    RowMarqueeState::Resetting {
-                        start: Instant::now(),
-                        from_offset,
-                    },
-                );
-            }
-        }
-    }
-
-    /// Calculate marquee offset and scrolling state for a session row
-    fn calculate_marquee_state(
-        &self,
-        session_id: &str,
-        session_name: &str,
-    ) -> (f32, bool) {
-        let marquee_state = self
-            .row_states
-            .get(session_id)
-            .cloned()
-            .unwrap_or_default();
-
-        // Use unicode-width for accurate width calculation
-        let display_width = session_name.width();
-        let estimated_text_width = display_width as f32 * MARQUEE_CHAR_WIDTH;
-        let needs_marquee = estimated_text_width > SESSION_NAME_WIDTH;
-
-        match &marquee_state {
-            RowMarqueeState::Idle => (0.0, false),
-            RowMarqueeState::Scrolling { start } if needs_marquee => (
-                calculate_marquee_offset(estimated_text_width, SESSION_NAME_WIDTH, *start),
-                true,
-            ),
-            RowMarqueeState::Scrolling { .. } => (0.0, false),
-            RowMarqueeState::Resetting { start, from_offset } => {
-                let offset = session_list::calculate_reset_offset(
-                    *from_offset,
-                    start.elapsed().as_millis(),
-                );
-                (offset, false)
-            }
-        }
-    }
-
     /// Render a session row with hover-based marquee scrolling
     fn render_session_row(
         &self,
@@ -201,21 +202,21 @@ impl HudView {
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
         let session_id = session.session_id.clone();
-        let session_name = extract_session_name(&session.cwd);
+        let session_name = session
+            .name
+            .clone()
+            .unwrap_or_else(|| extract_session_name(&session.cwd));
         let (marquee_offset, is_scrolling) =
-            self.calculate_marquee_state(&session_id, &session_name);
+            self.marquee.calculate_state(&session_id, &session_name);
 
-        // Calculate needs_marquee for hover handler
-        let display_width = session_name.width();
-        let estimated_text_width = display_width as f32 * MARQUEE_CHAR_WIDTH;
-        let needs_marquee = estimated_text_width > SESSION_NAME_WIDTH;
-
+        let needs_marquee = MarqueeAnimator::needs_marquee(&session_name);
         let session_id_for_hover = session_id.clone();
 
         div()
             .id(SharedString::from(format!("session-row-{}", session_id)))
-            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
-                this.handle_row_hover(session_id_for_hover.clone(), needs_marquee, *hovered, cx);
+            .on_hover(cx.listener(move |this, hovered: &bool, _window, _cx| {
+                this.marquee
+                    .handle_row_hover(session_id_for_hover.clone(), needs_marquee, *hovered);
             }))
             .child(session_list::render_row_content(
                 session.state,
@@ -261,7 +262,7 @@ impl Render for HudView {
         }
 
         // Clean up completed reset animations (Resetting -> Idle when done)
-        self.cleanup_completed_resets();
+        self.marquee.cleanup_completed_resets();
 
         let hud_state = self.state.read(cx);
         let sessions = &hud_state.sessions;
@@ -415,7 +416,7 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>) {
                     is_hovered: false,
                     hover_left_at: None,
                     last_session_count: 0,
-                    row_states: HashMap::new(),
+                    marquee: MarqueeAnimator::default(),
                 })
             },
         )

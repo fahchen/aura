@@ -58,6 +58,8 @@ pub enum AgentEvent {
     Idle { session_id: String, cwd: String },
     /// Session ended
     SessionEnded { session_id: String },
+    /// Session name updated (via `aura set-name`)
+    SessionNameUpdated { session_id: String, name: String },
 }
 
 impl AgentEvent {
@@ -71,11 +73,12 @@ impl AgentEvent {
             | Self::NeedsAttention { session_id, .. }
             | Self::Compacting { session_id, .. }
             | Self::Idle { session_id, .. }
-            | Self::SessionEnded { session_id } => session_id,
+            | Self::SessionEnded { session_id }
+            | Self::SessionNameUpdated { session_id, .. } => session_id,
         }
     }
 
-    /// Get cwd from any event (empty for SessionEnded)
+    /// Get cwd from any event (empty for SessionEnded and SessionNameUpdated)
     pub fn cwd(&self) -> &str {
         match self {
             Self::SessionStarted { cwd, .. }
@@ -85,7 +88,7 @@ impl AgentEvent {
             | Self::NeedsAttention { cwd, .. }
             | Self::Compacting { cwd, .. }
             | Self::Idle { cwd, .. } => cwd,
-            Self::SessionEnded { .. } => "",
+            Self::SessionEnded { .. } | Self::SessionNameUpdated { .. } => "",
         }
     }
 }

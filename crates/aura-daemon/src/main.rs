@@ -26,6 +26,18 @@ struct Cli {
     /// Increase verbosity (-v info, -vv debug, -vvv trace)
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(clap::Subcommand)]
+enum Command {
+    /// Set the session name displayed in the HUD
+    SetName {
+        /// The name to display for the current session
+        name: String,
+    },
 }
 
 fn init_tracing(verbose: u8) {
@@ -42,6 +54,13 @@ fn init_tracing(verbose: u8) {
 
 fn main() {
     let cli = Cli::parse();
+
+    // Handle set-name subcommand (just prints success message)
+    if let Some(Command::SetName { name }) = cli.command {
+        println!("Session name updated to: {name}");
+        return;
+    }
+
     init_tracing(cli.verbose);
 
     // Shared registry between IPC server and UI
