@@ -17,6 +17,19 @@ fn init_tracing() {
     fmt().with_env_filter(filter).with_target(false).init();
 }
 
+/// Check if the hook event should trigger a terminal bell.
+///
+/// Rings for `idle_prompt` and `permission_prompt` notification types.
+fn should_ring_bell(hook: &HookEvent) -> bool {
+    matches!(
+        hook,
+        HookEvent::Notification(p) if matches!(
+            p.notification_type.as_deref(),
+            Some("idle_prompt") | Some("permission_prompt")
+        )
+    )
+}
+
 /// Process hook input: parse JSON and convert to AgentEvent.
 ///
 /// This is the core processing logic, extracted for testability.
@@ -35,16 +48,22 @@ fn main() {
         std::process::exit(1);
     }
 
-    // Process input
-    let event = match process_hook_input(&input) {
-        Ok(e) => e,
+    // Parse hook first to check for bell
+    let hook: HookEvent = match parse_hook(&input) {
+        Ok(h) => h,
         Err(e) => {
-            error!("{e}");
+            error!("failed to parse hook: {e}");
             std::process::exit(1);
         }
     };
 
-    // Send to daemon via IPC (fail gracefully if daemon not running)
+    // Ring terminal bell for attention-requiring notifications
+    if should_ring_bell(&hook) {
+        eprint!("\x07");
+    }
+
+    // Convert to AgentEvent and send to daemon
+    let event: AgentEvent = hook.into();
     if let Err(e) = send_to_daemon(&event) {
         error!("{e}");
         // Exit 0 so Claude Code doesn't fail
@@ -144,6 +163,7 @@ mod tests {
                 tool_id,
                 tool_name,
                 tool_label,
+                ..
             } => {
                 assert_eq!(session_id, "s1");
                 assert_eq!(tool_id, "toolu_abc123");
@@ -170,6 +190,7 @@ mod tests {
             AgentEvent::ToolCompleted {
                 session_id,
                 tool_id,
+                ..
             } => {
                 assert_eq!(session_id, "s1");
                 assert_eq!(tool_id, "toolu_abc123");
@@ -190,7 +211,7 @@ mod tests {
         let event = process_hook_input(json).unwrap();
 
         match event {
-            AgentEvent::NeedsAttention { session_id, message } => {
+            AgentEvent::NeedsAttention { session_id, message, .. } => {
                 assert_eq!(session_id, "s1");
                 assert_eq!(message, Some("Bash".into()));
             }
@@ -209,7 +230,7 @@ mod tests {
         let event = process_hook_input(json).unwrap();
 
         match event {
-            AgentEvent::Idle { session_id } => {
+            AgentEvent::Idle { session_id, .. } => {
                 assert_eq!(session_id, "s1");
             }
             _ => panic!("Expected Idle event"),
@@ -228,7 +249,7 @@ mod tests {
         let event = process_hook_input(json).unwrap();
 
         match event {
-            AgentEvent::Compacting { session_id } => {
+            AgentEvent::Compacting { session_id, .. } => {
                 assert_eq!(session_id, "s1");
             }
             _ => panic!("Expected Compacting event"),
@@ -266,7 +287,7 @@ mod tests {
         let event = process_hook_input(json).unwrap();
 
         match event {
-            AgentEvent::Activity { session_id } => {
+            AgentEvent::Activity { session_id, .. } => {
                 assert_eq!(session_id, "s1");
             }
             _ => panic!("Expected Activity event"),
@@ -286,7 +307,7 @@ mod tests {
         let event = process_hook_input(json).unwrap();
 
         match event {
-            AgentEvent::NeedsAttention { session_id, message } => {
+            AgentEvent::NeedsAttention { session_id, message, .. } => {
                 assert_eq!(session_id, "s1");
                 assert_eq!(message, Some("Permission needed for Bash".into()));
             }
@@ -306,7 +327,7 @@ mod tests {
         let event = process_hook_input(json).unwrap();
 
         match event {
-            AgentEvent::Activity { session_id } => {
+            AgentEvent::Activity { session_id, .. } => {
                 assert_eq!(session_id, "s1");
             }
             _ => panic!("Expected Activity event for non-permission notification"),
@@ -324,7 +345,7 @@ mod tests {
         let event = process_hook_input(json).unwrap();
 
         match event {
-            AgentEvent::Activity { session_id } => {
+            AgentEvent::Activity { session_id, .. } => {
                 assert_eq!(session_id, "s1");
             }
             _ => panic!("Expected Activity event"),
@@ -409,7 +430,7 @@ mod tests {
         let event = process_hook_input(json).unwrap();
 
         match event {
-            AgentEvent::Idle { session_id } => {
+            AgentEvent::Idle { session_id, .. } => {
                 assert_eq!(session_id, "s1");
             }
             _ => panic!("Expected Idle event"),
@@ -452,7 +473,7 @@ mod tests {
         let result = process_hook_input(json);
         // Either way is acceptable behavior, just verify it doesn't panic
         match result {
-            Ok(AgentEvent::Idle { session_id }) => {
+            Ok(AgentEvent::Idle { session_id, .. }) => {
                 assert_eq!(session_id, "s1");
             }
             Err(e) => {
@@ -461,5 +482,59 @@ mod tests {
             }
             _ => panic!("Unexpected event type"),
         }
+    }
+
+    // ==================== Bell notification tests ====================
+
+    #[test]
+    fn bell_rings_for_idle_prompt() {
+        let json = r#"{
+            "hook_event_name": "Notification",
+            "session_id": "s1",
+            "cwd": "/tmp",
+            "notification_type": "idle_prompt"
+        }"#;
+
+        let hook = parse_hook(json).unwrap();
+        assert!(should_ring_bell(&hook));
+    }
+
+    #[test]
+    fn bell_rings_for_permission_prompt() {
+        let json = r#"{
+            "hook_event_name": "Notification",
+            "session_id": "s1",
+            "cwd": "/tmp",
+            "notification_type": "permission_prompt",
+            "message": "Permission needed"
+        }"#;
+
+        let hook = parse_hook(json).unwrap();
+        assert!(should_ring_bell(&hook));
+    }
+
+    #[test]
+    fn bell_does_not_ring_for_other_notifications() {
+        let json = r#"{
+            "hook_event_name": "Notification",
+            "session_id": "s1",
+            "cwd": "/tmp",
+            "notification_type": "idle"
+        }"#;
+
+        let hook = parse_hook(json).unwrap();
+        assert!(!should_ring_bell(&hook));
+    }
+
+    #[test]
+    fn bell_does_not_ring_for_non_notification_events() {
+        let json = r#"{
+            "hook_event_name": "Stop",
+            "session_id": "s1",
+            "cwd": "/tmp"
+        }"#;
+
+        let hook = parse_hook(json).unwrap();
+        assert!(!should_ring_bell(&hook));
     }
 }

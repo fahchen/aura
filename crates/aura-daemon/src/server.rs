@@ -151,6 +151,7 @@ mod tests {
         // Then start a tool
         let tool_event = AgentEvent::ToolStarted {
             session_id: "s1".into(),
+            cwd: "/tmp".into(),
             tool_id: "t1".into(),
             tool_name: "Read".into(),
             tool_label: Some("main.rs".into()),
@@ -180,6 +181,7 @@ mod tests {
         handle_message(
             IpcMessage::Event(AgentEvent::ToolStarted {
                 session_id: "s1".into(),
+                cwd: "/tmp".into(),
                 tool_id: "t1".into(),
                 tool_name: "Read".into(),
                 tool_label: None,
@@ -191,6 +193,7 @@ mod tests {
         let response = handle_message(
             IpcMessage::Event(AgentEvent::ToolCompleted {
                 session_id: "s1".into(),
+                cwd: "/tmp".into(),
                 tool_id: "t1".into(),
             }),
             &registry,

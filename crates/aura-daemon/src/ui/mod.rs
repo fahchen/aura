@@ -35,10 +35,12 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
 use unicode_width::UnicodeWidthStr;
 
 /// Collapse delay duration
 const COLLAPSE_DELAY: Duration = Duration::from_millis(3000);
+
 
 /// Animation state for a session row's marquee
 #[derive(Clone)]
@@ -96,17 +98,17 @@ impl HudView {
             return false;
         }
 
+        // Hovered -> stay expanded
         if self.is_hovered {
             return true;
         }
 
-        if let Some(left_at) = self.hover_left_at {
-            if left_at.elapsed() < COLLAPSE_DELAY {
-                return true;
-            }
+        match self.hover_left_at {
+            // Mouse left - check if delay expired
+            Some(left_at) => left_at.elapsed() < COLLAPSE_DELAY,
+            // Mouse never entered - stay expanded (expand on event)
+            None => true,
         }
-
-        false
     }
 
     /// Clean up completed reset animations by transitioning Resetting -> Idle
@@ -235,7 +237,7 @@ impl Render for HudView {
             state.refresh_from_registry();
         });
 
-        // Update hover state from window (on_hover events don't fire when mouse leaves window)
+        // Update hover state from window
         let window_hovered = window.is_window_hovered();
         if window_hovered != self.is_hovered {
             if window_hovered {
@@ -253,13 +255,6 @@ impl Render for HudView {
         let should_expand = self.should_be_expanded(has_sessions);
         if should_expand != self.is_expanded {
             self.set_expanded(should_expand, window, cx);
-        }
-
-        // Clean up stale hover_left_at
-        if let Some(left_at) = self.hover_left_at {
-            if left_at.elapsed() >= COLLAPSE_DELAY {
-                self.hover_left_at = None;
-            }
         }
 
         // Clean up completed reset animations (Resetting -> Idle when done)

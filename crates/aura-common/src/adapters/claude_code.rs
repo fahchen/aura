@@ -251,11 +251,13 @@ impl From<HookEvent> for AgentEvent {
             },
             HookEvent::UserPromptSubmit(p) => AgentEvent::Activity {
                 session_id: p.common.session_id,
+                cwd: p.common.cwd,
             },
             HookEvent::PreToolUse(p) => {
                 let tool_label = extract_tool_label(&p.tool_name, p.tool_input.as_ref());
                 AgentEvent::ToolStarted {
                     session_id: p.common.session_id,
+                    cwd: p.common.cwd,
                     tool_id: p.tool_use_id,
                     tool_name: p.tool_name,
                     tool_label,
@@ -263,32 +265,39 @@ impl From<HookEvent> for AgentEvent {
             }
             HookEvent::PostToolUse(p) => AgentEvent::ToolCompleted {
                 session_id: p.common.session_id,
+                cwd: p.common.cwd,
                 tool_id: p.tool_use_id,
             },
             HookEvent::PermissionRequest(p) => AgentEvent::NeedsAttention {
                 session_id: p.common.session_id,
+                cwd: p.common.cwd,
                 message: p.tool_name,
             },
             HookEvent::Notification(p) => {
                 if p.notification_type.as_deref() == Some("permission_prompt") {
                     AgentEvent::NeedsAttention {
                         session_id: p.common.session_id,
+                        cwd: p.common.cwd,
                         message: p.message,
                     }
                 } else {
                     AgentEvent::Activity {
                         session_id: p.common.session_id,
+                        cwd: p.common.cwd,
                     }
                 }
             }
             HookEvent::Stop(p) => AgentEvent::Idle {
                 session_id: p.common.session_id,
+                cwd: p.common.cwd,
             },
             HookEvent::SubagentStop(p) => AgentEvent::Activity {
                 session_id: p.common.session_id,
+                cwd: p.common.cwd,
             },
             HookEvent::PreCompact(p) => AgentEvent::Compacting {
                 session_id: p.common.session_id,
+                cwd: p.common.cwd,
             },
             HookEvent::SessionEnd(p) => AgentEvent::SessionEnded {
                 session_id: p.common.session_id,
@@ -349,6 +358,7 @@ mod tests {
                 tool_id,
                 tool_name,
                 tool_label,
+                ..
             } => {
                 assert_eq!(session_id, "abc123");
                 assert_eq!(tool_id, "toolu_01ABC");
@@ -376,6 +386,7 @@ mod tests {
             AgentEvent::ToolCompleted {
                 session_id,
                 tool_id,
+                ..
             } => {
                 assert_eq!(session_id, "abc123");
                 assert_eq!(tool_id, "toolu_01ABC");
@@ -397,7 +408,7 @@ mod tests {
         let event: AgentEvent = hook.into();
 
         match event {
-            AgentEvent::NeedsAttention { session_id, message } => {
+            AgentEvent::NeedsAttention { session_id, message, .. } => {
                 assert_eq!(session_id, "abc123");
                 assert_eq!(message, Some("Bash".into()));
             }
@@ -419,7 +430,7 @@ mod tests {
         let event: AgentEvent = hook.into();
 
         match event {
-            AgentEvent::NeedsAttention { session_id, message } => {
+            AgentEvent::NeedsAttention { session_id, message, .. } => {
                 assert_eq!(session_id, "abc123");
                 assert_eq!(message, Some("Claude needs permission to run Bash".into()));
             }
@@ -440,7 +451,7 @@ mod tests {
         let event: AgentEvent = hook.into();
 
         match event {
-            AgentEvent::Activity { session_id } => {
+            AgentEvent::Activity { session_id, .. } => {
                 assert_eq!(session_id, "abc123");
             }
             _ => panic!("Expected Activity for non-permission notification"),
@@ -459,7 +470,7 @@ mod tests {
         let event: AgentEvent = hook.into();
 
         match event {
-            AgentEvent::Idle { session_id } => {
+            AgentEvent::Idle { session_id, .. } => {
                 assert_eq!(session_id, "abc123");
             }
             _ => panic!("Expected Idle"),
@@ -479,7 +490,7 @@ mod tests {
         let event: AgentEvent = hook.into();
 
         match event {
-            AgentEvent::Compacting { session_id } => {
+            AgentEvent::Compacting { session_id, .. } => {
                 assert_eq!(session_id, "abc123");
             }
             _ => panic!("Expected Compacting"),
@@ -518,7 +529,7 @@ mod tests {
         let event: AgentEvent = hook.into();
 
         match event {
-            AgentEvent::Activity { session_id } => {
+            AgentEvent::Activity { session_id, .. } => {
                 assert_eq!(session_id, "abc123");
             }
             _ => panic!("Expected Activity"),
@@ -537,7 +548,7 @@ mod tests {
         let event: AgentEvent = hook.into();
 
         match event {
-            AgentEvent::Activity { session_id } => {
+            AgentEvent::Activity { session_id, .. } => {
                 assert_eq!(session_id, "abc123");
             }
             _ => panic!("Expected Activity"),

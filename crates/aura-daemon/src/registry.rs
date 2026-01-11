@@ -85,18 +85,12 @@ impl SessionRegistry {
         Self::default()
     }
 
-    /// Get existing session or create a new one for late-joining sessions
-    fn get_or_create_session(&mut self, session_id: &str, cwd: Option<&str>) -> &mut Session {
-        if !self.sessions.contains_key(session_id) {
-            info!(%session_id, "late session registration");
-            let session = Session::new(
-                session_id.to_string(),
-                cwd.unwrap_or("unknown").to_string(),
-                AgentType::ClaudeCode,
-            );
-            self.sessions.insert(session_id.to_string(), session);
-        }
-        self.sessions.get_mut(session_id).unwrap()
+    /// Get existing session or create a new one (late registration)
+    fn get_or_create(&mut self, session_id: &str, cwd: &str) -> &mut Session {
+        self.sessions.entry(session_id.to_string()).or_insert_with(|| {
+            info!(%session_id, %cwd, "late session registration");
+            Session::new(session_id.to_string(), cwd.to_string(), AgentType::ClaudeCode)
+        })
     }
 
     /// Process an agent event and update session state
@@ -112,11 +106,10 @@ impl SessionRegistry {
                 self.sessions.insert(session_id, session);
             }
 
-            AgentEvent::Activity { session_id } => {
+            AgentEvent::Activity { session_id, cwd } => {
                 trace!(%session_id, "activity");
-                let session = self.get_or_create_session(&session_id, None);
+                let session = self.get_or_create(&session_id, &cwd);
                 session.touch();
-                // Only update state if not in Attention or Compacting
                 if session.state == SessionState::Idle || session.state == SessionState::Stale {
                     session.state = SessionState::Running;
                 }
@@ -124,27 +117,26 @@ impl SessionRegistry {
 
             AgentEvent::ToolStarted {
                 session_id,
+                cwd,
                 tool_id,
                 tool_name,
                 tool_label,
             } => {
                 debug!(%session_id, %tool_name, "tool started");
-                let session = self.get_or_create_session(&session_id, None);
+                let session = self.get_or_create(&session_id, &cwd);
                 session.touch();
                 session.state = SessionState::Running;
-                session
-                    .running_tools
-                    .push(RunningTool { tool_id, tool_name, tool_label });
+                session.running_tools.push(RunningTool { tool_id, tool_name, tool_label });
             }
 
             AgentEvent::ToolCompleted {
                 session_id,
+                cwd,
                 tool_id,
             } => {
                 debug!(%session_id, %tool_id, "tool completed");
-                let session = self.get_or_create_session(&session_id, None);
+                let session = self.get_or_create(&session_id, &cwd);
                 session.touch();
-                // Move to recent_tools for minimum display duration
                 if let Some(pos) = session.running_tools.iter().position(|t| t.tool_id == tool_id) {
                     let tool = session.running_tools.remove(pos);
                     session.recent_tools.push(RecentTool {
@@ -157,24 +149,25 @@ impl SessionRegistry {
 
             AgentEvent::NeedsAttention {
                 session_id,
+                cwd,
                 message: _,
             } => {
                 info!(%session_id, "needs attention");
-                let session = self.get_or_create_session(&session_id, None);
+                let session = self.get_or_create(&session_id, &cwd);
                 session.touch();
                 session.state = SessionState::Attention;
             }
 
-            AgentEvent::Compacting { session_id } => {
+            AgentEvent::Compacting { session_id, cwd } => {
                 info!(%session_id, "compacting");
-                let session = self.get_or_create_session(&session_id, None);
+                let session = self.get_or_create(&session_id, &cwd);
                 session.touch();
                 session.state = SessionState::Compacting;
             }
 
-            AgentEvent::Idle { session_id } => {
+            AgentEvent::Idle { session_id, cwd } => {
                 debug!(%session_id, "idle");
-                let session = self.get_or_create_session(&session_id, None);
+                let session = self.get_or_create(&session_id, &cwd);
                 session.touch();
                 session.state = SessionState::Idle;
                 session.running_tools.clear();
@@ -241,6 +234,7 @@ mod tests {
         // Tool started
         registry.process_event(AgentEvent::ToolStarted {
             session_id: "s1".into(),
+            cwd: "/tmp".into(),
             tool_id: "t1".into(),
             tool_name: "Read".into(),
             tool_label: Some("config.rs".into()),
@@ -251,6 +245,7 @@ mod tests {
         // Tool completed - tool moves to recent_tools and stays visible
         registry.process_event(AgentEvent::ToolCompleted {
             session_id: "s1".into(),
+            cwd: "/tmp".into(),
             tool_id: "t1".into(),
         });
         let sessions = registry.get_all();
@@ -261,6 +256,7 @@ mod tests {
         // Idle
         registry.process_event(AgentEvent::Idle {
             session_id: "s1".into(),
+            cwd: "/tmp".into(),
         });
         let sessions = registry.get_all();
         assert_eq!(sessions[0].state, SessionState::Idle);
@@ -284,6 +280,7 @@ mod tests {
 
         registry.process_event(AgentEvent::NeedsAttention {
             session_id: "s1".into(),
+            cwd: "/tmp".into(),
             message: Some("Permission needed".into()),
         });
 
@@ -303,6 +300,7 @@ mod tests {
 
         registry.process_event(AgentEvent::Compacting {
             session_id: "s1".into(),
+            cwd: "/tmp".into(),
         });
 
         let sessions = registry.get_all();
@@ -322,12 +320,14 @@ mod tests {
         // Start two tools
         registry.process_event(AgentEvent::ToolStarted {
             session_id: "s1".into(),
+            cwd: "/tmp".into(),
             tool_id: "t1".into(),
             tool_name: "Read".into(),
             tool_label: Some("main.rs".into()),
         });
         registry.process_event(AgentEvent::ToolStarted {
             session_id: "s1".into(),
+            cwd: "/tmp".into(),
             tool_id: "t2".into(),
             tool_name: "Bash".into(),
             tool_label: Some("cargo build".into()),
@@ -339,6 +339,7 @@ mod tests {
         // Complete one - it moves to recent_tools but still visible
         registry.process_event(AgentEvent::ToolCompleted {
             session_id: "s1".into(),
+            cwd: "/tmp".into(),
             tool_id: "t1".into(),
         });
 
@@ -354,12 +355,13 @@ mod tests {
     }
 
     #[test]
-    fn unknown_session_auto_created() {
+    fn late_session_registration() {
         let mut registry = SessionRegistry::new();
 
         // Events for unknown session should auto-create the session
         registry.process_event(AgentEvent::ToolStarted {
             session_id: "late".into(),
+            cwd: "/tmp".into(),
             tool_id: "t1".into(),
             tool_name: "Read".into(),
             tool_label: None,
@@ -368,7 +370,6 @@ mod tests {
         assert_eq!(registry.len(), 1);
         let sessions = registry.get_all();
         assert_eq!(sessions[0].session_id, "late");
-        assert_eq!(sessions[0].cwd, "unknown");
         assert_eq!(sessions[0].running_tools.len(), 1);
     }
 
@@ -385,12 +386,14 @@ mod tests {
         // Start and immediately complete a tool
         registry.process_event(AgentEvent::ToolStarted {
             session_id: "s1".into(),
+            cwd: "/tmp".into(),
             tool_id: "t1".into(),
             tool_name: "Read".into(),
             tool_label: Some("test.rs".into()),
         });
         registry.process_event(AgentEvent::ToolCompleted {
             session_id: "s1".into(),
+            cwd: "/tmp".into(),
             tool_id: "t1".into(),
         });
 

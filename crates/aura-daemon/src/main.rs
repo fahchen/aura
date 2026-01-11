@@ -17,8 +17,8 @@ use tracing_subscriber::{fmt, EnvFilter};
 /// Stale detection interval
 const STALE_CHECK_INTERVAL: Duration = Duration::from_secs(10);
 
-/// Stale timeout - mark session stale after 60s of no activity
-const STALE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Stale timeout - mark session stale after 10min of no activity
+const STALE_TIMEOUT: Duration = Duration::from_secs(600);
 
 #[derive(Parser)]
 #[command(name = "aura", about = "Aura HUD daemon")]

@@ -15,7 +15,7 @@ pub enum SessionState {
     Attention,
     /// Context window compacting
     Compacting,
-    /// No activity for 60s+
+    /// No activity for 10min+
     Stale,
 }
 

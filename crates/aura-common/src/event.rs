@@ -31,25 +31,31 @@ pub enum AgentEvent {
         agent: AgentType,
     },
     /// Activity detected (health check)
-    Activity { session_id: String },
+    Activity { session_id: String, cwd: String },
     /// Tool execution started
     ToolStarted {
         session_id: String,
+        cwd: String,
         tool_id: String,
         tool_name: String,
         tool_label: Option<String>,
     },
     /// Tool execution completed
-    ToolCompleted { session_id: String, tool_id: String },
+    ToolCompleted {
+        session_id: String,
+        cwd: String,
+        tool_id: String,
+    },
     /// Agent needs user attention (e.g., permission request)
     NeedsAttention {
         session_id: String,
+        cwd: String,
         message: Option<String>,
     },
     /// Context compacting in progress
-    Compacting { session_id: String },
+    Compacting { session_id: String, cwd: String },
     /// Agent is idle, waiting for user input
-    Idle { session_id: String },
+    Idle { session_id: String, cwd: String },
     /// Session ended
     SessionEnded { session_id: String },
 }
@@ -58,14 +64,28 @@ impl AgentEvent {
     /// Get session_id from any event
     pub fn session_id(&self) -> &str {
         match self {
-            Self::SessionStarted { session_id, .. } => session_id,
-            Self::Activity { session_id } => session_id,
-            Self::ToolStarted { session_id, .. } => session_id,
-            Self::ToolCompleted { session_id, .. } => session_id,
-            Self::NeedsAttention { session_id, .. } => session_id,
-            Self::Compacting { session_id } => session_id,
-            Self::Idle { session_id } => session_id,
-            Self::SessionEnded { session_id } => session_id,
+            Self::SessionStarted { session_id, .. }
+            | Self::Activity { session_id, .. }
+            | Self::ToolStarted { session_id, .. }
+            | Self::ToolCompleted { session_id, .. }
+            | Self::NeedsAttention { session_id, .. }
+            | Self::Compacting { session_id, .. }
+            | Self::Idle { session_id, .. }
+            | Self::SessionEnded { session_id } => session_id,
+        }
+    }
+
+    /// Get cwd from any event (empty for SessionEnded)
+    pub fn cwd(&self) -> &str {
+        match self {
+            Self::SessionStarted { cwd, .. }
+            | Self::Activity { cwd, .. }
+            | Self::ToolStarted { cwd, .. }
+            | Self::ToolCompleted { cwd, .. }
+            | Self::NeedsAttention { cwd, .. }
+            | Self::Compacting { cwd, .. }
+            | Self::Idle { cwd, .. } => cwd,
+            Self::SessionEnded { .. } => "",
         }
     }
 }
@@ -84,26 +104,32 @@ mod tests {
             },
             AgentEvent::Activity {
                 session_id: "s2".into(),
+                cwd: "/tmp".into(),
             },
             AgentEvent::ToolStarted {
                 session_id: "s3".into(),
+                cwd: "/tmp".into(),
                 tool_id: "t1".into(),
                 tool_name: "Read".into(),
                 tool_label: None,
             },
             AgentEvent::ToolCompleted {
                 session_id: "s4".into(),
+                cwd: "/tmp".into(),
                 tool_id: "t1".into(),
             },
             AgentEvent::NeedsAttention {
                 session_id: "s5".into(),
+                cwd: "/tmp".into(),
                 message: Some("Permission needed".into()),
             },
             AgentEvent::Compacting {
                 session_id: "s6".into(),
+                cwd: "/tmp".into(),
             },
             AgentEvent::Idle {
                 session_id: "s7".into(),
+                cwd: "/tmp".into(),
             },
             AgentEvent::SessionEnded {
                 session_id: "s8".into(),
@@ -119,6 +145,7 @@ mod tests {
     fn agent_event_serialization() {
         let event = AgentEvent::ToolStarted {
             session_id: "abc123".into(),
+            cwd: "/tmp".into(),
             tool_id: "toolu_01".into(),
             tool_name: "Read".into(),
             tool_label: Some("config.rs".into()),
