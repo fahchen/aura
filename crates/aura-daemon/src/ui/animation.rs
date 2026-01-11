@@ -81,6 +81,18 @@ pub fn ease_out(t: f32) -> f32 {
 /// Reset animation duration in milliseconds
 pub const RESET_DURATION_MS: u64 = 300;
 
+/// Shake animation constants
+const SHAKE_PERIOD_MS: f32 = 150.0; // Oscillation period in milliseconds
+const SHAKE_AMPLITUDE: f32 = 1.5; // Maximum horizontal displacement in pixels
+
+/// Calculate horizontal shake offset for attention animation.
+/// Returns x-offset in pixels oscillating between -amplitude and +amplitude.
+pub fn calculate_shake_offset(start_time: Instant) -> f32 {
+    let elapsed_ms = start_time.elapsed().as_millis() as f32;
+    let phase = (elapsed_ms / SHAKE_PERIOD_MS) * std::f32::consts::TAU;
+    phase.sin() * SHAKE_AMPLITUDE
+}
+
 /// Monaco 13px monospace font: base unit width
 pub const MARQUEE_CHAR_WIDTH: f32 = 7.8;
 /// Separator: 4 spaces
@@ -150,5 +162,21 @@ mod tests {
         // Text fits in container - should always return 0
         assert_eq!(calculate_marquee_offset(50.0, 80.0, start), 0.0);
         assert_eq!(calculate_marquee_offset(80.0, 80.0, start), 0.0);
+    }
+
+    #[test]
+    fn test_shake_offset_bounds() {
+        let start = Instant::now();
+        // At t=0, offset should be near 0 (sin(0) = 0)
+        let offset = calculate_shake_offset(start);
+        assert!(offset.abs() < 0.5, "Initial offset should be near 0");
+
+        // Offset should always be within amplitude bounds
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let offset = calculate_shake_offset(start);
+        assert!(
+            offset.abs() <= SHAKE_AMPLITUDE + 0.1,
+            "Offset should be within amplitude bounds"
+        );
     }
 }

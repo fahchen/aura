@@ -75,7 +75,7 @@ pub fn render_row_content(
                         .ml(px(marquee_offset))
                         .font_family("Maple Mono NF CN")
                         .text_size(px(13.0))
-                        .text_color(gpui::rgb(0xFFFFFF))
+                        .text_color(gpui::rgb(0x1a1a1a)) // Dark text for glass background
                         .whitespace_nowrap()
                         .child(if needs_marquee && is_scrolling {
                             // Two copies for seamless loop when scrolling
@@ -159,9 +159,14 @@ pub fn render_tool_with_icon(tool_name: &str, opacity: f32) -> Div {
         .child(div().text_color(color).child(tool_name.to_string()))
 }
 
-/// Create RGBA color with specified alpha (0.0 to 1.0)
+/// Create dark RGBA color with specified alpha (0.0 to 1.0) for glass background
 fn rgba_with_alpha(alpha: f32) -> gpui::Rgba {
-    gpui::rgba((0xFFFFFF00u32) | ((alpha * 255.0) as u32))
+    // Dark gray color (0x1a1a1a) with alpha for glass background contrast
+    let r = 0x1a;
+    let g = 0x1a;
+    let b = 0x1a;
+    let a = (alpha * 255.0) as u32;
+    gpui::rgba((r << 24) | (g << 16) | (b << 8) | a)
 }
 
 /// Extract session name from cwd (last folder name)

@@ -2,16 +2,16 @@
 //!
 //! Architecture:
 //! - assets.rs: SVG icon asset source
-//! - status_bar.rs: Collapsed two-icon view
+//! - indicator.rs: Collapsed single-icon view (Nerd Font glyph with gloss effect)
 //! - session_list.rs: Expanded session row rendering
-//! - animation.rs: Tool cycling and marquee animations
+//! - animation.rs: Tool cycling, marquee, and shake animations
 //! - icons.rs: Icon paths and colors
 
 mod animation;
 mod assets;
 mod icons;
+mod indicator;
 mod session_list;
-mod status_bar;
 
 use animation::{
     calculate_animation_state, calculate_marquee_offset, MARQUEE_CHAR_WIDTH,
@@ -30,7 +30,7 @@ use session_list::{
     calculate_expanded_height, extract_session_name, ROW_GAP, SESSION_NAME_WIDTH,
     WIDTH as EXPANDED_WIDTH, MAX_SESSIONS,
 };
-use status_bar::{HEIGHT as COLLAPSED_HEIGHT, WIDTH as COLLAPSED_WIDTH};
+use indicator::{HEIGHT as COLLAPSED_HEIGHT, WIDTH as COLLAPSED_WIDTH};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -94,9 +94,12 @@ impl HudView {
         self.is_hovered = hovered;
 
         if hovered {
-            // Mouse entered - expand immediately and clear any pending collapse
+            // Mouse entered - expand only if there are sessions to show
             self.hover_left_at = None;
-            self.set_expanded(true, window, cx);
+            let has_sessions = !self.state.read(cx).sessions.is_empty();
+            if has_sessions {
+                self.set_expanded(true, window, cx);
+            }
         } else {
             // Mouse left - record time for delayed collapse (checked in render)
             self.hover_left_at = Some(Instant::now());
@@ -260,11 +263,7 @@ impl Render for HudView {
         let (tool_index, fade_progress) =
             calculate_animation_state(animation_start, hud_state.animation_seed);
 
-        if sessions.is_empty() {
-            return div().id("hud-empty").size_full();
-        }
-
-        // Clone data needed for rendering
+        // Clone data needed for rendering (status_bar handles empty case with sleep icon)
         let sessions_for_render: Vec<_> = sessions.iter().take(MAX_SESSIONS).cloned().collect();
 
         // Container for HUD content
@@ -275,8 +274,8 @@ impl Render for HudView {
             .on_hover(cx.listener(|this, hovered: &bool, window, cx| {
                 this.set_hovered(*hovered, window, cx);
             }))
-            .child(if is_expanded {
-                // Expanded view: full session list
+            .child(if is_expanded && !sessions_for_render.is_empty() {
+                // Expanded view: full session list with glass background
                 div()
                     .size_full()
                     .flex()
@@ -284,15 +283,15 @@ impl Render for HudView {
                     .gap(px(ROW_GAP))
                     .p(px(6.0))
                     .rounded(px(8.0))
-                    .bg(gpui::rgba(0x000000BB))
+                    .bg(gpui::rgba(0xFFFFFF40)) // Glass: semi-transparent white
                     .children(
                         sessions_for_render
                             .iter()
                             .map(|session| self.render_session_row(session, tool_index, fade_progress, cx)),
                     )
             } else {
-                // Collapsed view: two icons
-                status_bar::render(&sessions_for_render)
+                // Collapsed view: single icon (also used when no sessions)
+                indicator::render(&sessions_for_render, animation_start)
             })
     }
 }

@@ -46,6 +46,14 @@ pub mod colors {
         l: 0.46,
         a: 1.0,
     };
+
+    /// Warm cream/ivory base color for indicator (#FFF8E7)
+    pub const CREAM: Hsla = Hsla {
+        h: 43.0 / 360.0,
+        s: 1.0,
+        l: 0.96,
+        a: 1.0,
+    };
 }
 
 /// SVG paths for icons (Lucide, 24x24 viewBox)
