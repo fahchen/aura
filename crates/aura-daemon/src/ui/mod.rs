@@ -199,6 +199,7 @@ impl HudView {
         session: &SessionInfo,
         tool_index: usize,
         fade_progress: f32,
+        animation_start: Instant,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
         let session_id = session.session_id.clone();
@@ -226,6 +227,7 @@ impl HudView {
                 fade_progress,
                 marquee_offset,
                 is_scrolling,
+                animation_start,
             ))
     }
 }
@@ -287,7 +289,7 @@ impl Render for HudView {
                     .children(
                         sessions_for_render
                             .iter()
-                            .map(|session| self.render_session_row(session, tool_index, fade_progress, cx)),
+                            .map(|session| self.render_session_row(session, tool_index, fade_progress, animation_start, cx)),
                     )
             } else {
                 // Collapsed view: single icon (also used when no sessions)

@@ -1,14 +1,17 @@
 //! Session list rendering - expanded view with session rows
 //!
 //! Each row displays:
-//! - Status dot (colored by state)
+//! - State icon (Nerd Font glyph, monochrome with opacity)
 //! - Session name (folder name from cwd, with marquee for long names)
 //! - Current tool with cross-fade animation
 
-use super::animation::{ease_in_out, ease_out, MARQUEE_CHAR_WIDTH, RESET_DURATION_MS};
-use super::icons;
+use super::animation::{
+    calculate_shake_offset, ease_in_out, ease_out, MARQUEE_CHAR_WIDTH, RESET_DURATION_MS,
+};
+use super::icons::{self, state_icons};
 use aura_common::{RunningTool, SessionState};
 use gpui::{div, px, Div, ParentElement, Styled};
+use std::time::Instant;
 use unicode_width::UnicodeWidthStr;
 
 /// Session list dimensions
@@ -34,9 +37,8 @@ pub fn render_row_content(
     fade_progress: f32,
     marquee_offset: f32,
     is_scrolling: bool,
+    animation_start: Instant,
 ) -> Div {
-    let state_color = state_to_color(state);
-
     // Use unicode-width for accurate width calculation (CJK = 2 units, ASCII = 1 unit)
     let display_width = session_name.width();
     let estimated_text_width = display_width as f32 * MARQUEE_CHAR_WIDTH;
@@ -51,16 +53,8 @@ pub fn render_row_content(
         .gap(px(8.0))
         .px(px(8.0))
         .rounded(px(6.0))
-        // Status dot column (fixed width)
-        .child(
-            div()
-                .flex_shrink_0()
-                .w(px(STATUS_DOT_WIDTH))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(div().size(px(10.0)).rounded_full().bg(state_color)),
-        )
+        // State icon column (fixed width, Nerd Font glyph with opacity + shake)
+        .child(render_state_indicator(state, animation_start))
         // Session name column (fixed width with seamless marquee)
         .child(
             div()
@@ -225,7 +219,7 @@ pub fn extract_session_name(cwd: &str) -> String {
         .to_string()
 }
 
-/// Convert SessionState to color
+/// Convert SessionState to color (used by indicator.rs)
 pub fn state_to_color(state: SessionState) -> gpui::Hsla {
     match state {
         SessionState::Running => icons::colors::GREEN,
@@ -233,6 +227,72 @@ pub fn state_to_color(state: SessionState) -> gpui::Hsla {
         SessionState::Attention => icons::colors::YELLOW,
         SessionState::Compacting => icons::colors::PURPLE,
         SessionState::Stale => icons::colors::GRAY,
+    }
+}
+
+/// Render state indicator with Nerd Font icon and opacity
+///
+/// Uses monochrome color with varying opacity based on state urgency:
+/// - Running/Attention: 100% (active, needs attention)
+/// - Compacting: 70% (background work)
+/// - Idle: 50% (taking a break)
+/// - Stale: 30% (abandoned)
+///
+/// Attention state has a shake animation.
+fn render_state_indicator(state: SessionState, animation_start: Instant) -> Div {
+    let icon = state_to_icon(state);
+    let opacity = state_to_opacity(state);
+
+    // Calculate shake offset for Attention state
+    let shake_offset = if state == SessionState::Attention {
+        calculate_shake_offset(animation_start)
+    } else {
+        0.0
+    };
+
+    // Medium gray (#6B7280) with state-based opacity
+    let icon_color = gpui::Hsla {
+        h: 220.0 / 360.0,
+        s: 0.09,
+        l: 0.46,
+        a: opacity,
+    };
+
+    div()
+        .flex_shrink_0()
+        .w(px(STATUS_DOT_WIDTH))
+        .h(px(STATUS_DOT_WIDTH))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            div()
+                .ml(px(shake_offset)) // Apply horizontal shake for attention
+                .font_family("Maple Mono NF CN")
+                .text_size(px(12.0))
+                .text_color(icon_color)
+                .child(icon),
+        )
+}
+
+/// Get Nerd Font icon for session state
+fn state_to_icon(state: SessionState) -> &'static str {
+    match state {
+        SessionState::Running => state_icons::RUNNING,
+        SessionState::Attention => state_icons::ATTENTION,
+        SessionState::Compacting => state_icons::COMPACTING,
+        SessionState::Idle => state_icons::IDLE,
+        SessionState::Stale => state_icons::STALE,
+    }
+}
+
+/// Get opacity for session state (urgency hierarchy)
+fn state_to_opacity(state: SessionState) -> f32 {
+    match state {
+        SessionState::Running | SessionState::Attention => 1.0,
+        SessionState::Compacting => 0.7,
+        SessionState::Idle => 0.5,
+        SessionState::Stale => 0.3,
     }
 }
 

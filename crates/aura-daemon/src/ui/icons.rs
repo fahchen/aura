@@ -3,6 +3,20 @@
 //! Icons from Lucide (https://lucide.dev), 24x24 viewBox
 //! Rendered at 16x16px in the HUD
 
+/// Nerd Font glyphs for session state icons
+pub mod state_icons {
+    /// Keyboard icon - Running state (nf-fa-keyboard-o)
+    pub const RUNNING: &str = "\u{f11c}";
+    /// Bell icon - Attention state (nf-fa-bell)
+    pub const ATTENTION: &str = "\u{f0a2}";
+    /// Broom icon - Compacting state (nf-fa-broom)
+    pub const COMPACTING: &str = "\u{f51a}";
+    /// Coffee icon - Idle state (nf-fa-coffee)
+    pub const IDLE: &str = "\u{f0f4}";
+    /// Ghost icon - Stale state (nf-md-ghost)
+    pub const STALE: &str = "\u{f02a0}";
+}
+
 /// Icon colors (from design spec)
 pub mod colors {
     use gpui::Hsla;

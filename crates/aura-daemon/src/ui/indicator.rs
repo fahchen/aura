@@ -112,7 +112,7 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant) -> Div {
                 .h(px(CIRCLE_SIZE / 2.0))
                 .bg(gloss_color),
         )
-        // Icon (centered using explicit size + flex)
+        // Icon (centered using explicit size + flex, with shake animation)
         .child(
             div()
                 .absolute()
@@ -127,6 +127,7 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant) -> Div {
                         .flex()
                         .items_center()
                         .justify_center()
+                        .ml(px(shake_offset)) // Apply horizontal shake for attention
                         .font_family("Maple Mono NF CN")
                         .text_size(px(ICON_FONT_SIZE))
                         .text_color(icon_color)
