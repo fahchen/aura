@@ -21,8 +21,8 @@ use assets::Assets;
 use aura_common::SessionInfo;
 use crate::registry::SessionRegistry;
 use gpui::{
-    div, point, px, size, App, AppContext, Application, Bounds, Context, Entity,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    actions, div, point, px, size, App, AppContext, Application, Bounds, Context, Entity,
+    InteractiveElement, IntoElement, Menu, MenuItem, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Window, WindowBackgroundAppearance, WindowBounds,
     WindowKind, WindowOptions,
 };
@@ -37,6 +37,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use unicode_width::UnicodeWidthStr;
+
+// Define application actions
+actions!(aura, [Quit]);
 
 /// Collapse delay duration
 const COLLAPSE_DELAY: Duration = Duration::from_millis(3000);
@@ -300,9 +303,10 @@ impl Render for HudView {
                             .iter()
                             .map(|session| self.render_session_row(session, tool_index, fade_progress, animation_start, cx)),
                     )
+                    .into_any_element()
             } else {
                 // Collapsed view: single icon (also used when no sessions)
-                indicator::render(&sessions_for_render, animation_start)
+                indicator::render(&sessions_for_render, animation_start).into_any_element()
             })
     }
 }
@@ -339,6 +343,20 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>) {
         app.text_system()
             .add_fonts(vec![Cow::Borrowed(font_data.as_slice())])
             .expect("Failed to load Maple Mono font");
+
+        // Register quit action handler
+        app.on_action(|_: &Quit, cx: &mut App| {
+            cx.quit();
+        });
+
+        // Set up application menu
+        app.set_menus(vec![Menu {
+            name: "Aura".into(),
+            items: vec![MenuItem::action("Quit", Quit)],
+        }]);
+
+        // Activate app to show menu bar
+        app.activate(true);
 
         // Get primary display for positioning
         let displays = app.displays();
