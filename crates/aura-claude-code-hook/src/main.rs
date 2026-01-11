@@ -8,6 +8,14 @@ use aura_common::{socket_path, AgentEvent, IpcMessage, IpcResponse};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
+use tracing::error;
+use tracing_subscriber::{fmt, EnvFilter};
+
+fn init_tracing() {
+    let filter =
+        EnvFilter::try_from_env("AURA_LOG").unwrap_or_else(|_| EnvFilter::new("warn"));
+    fmt().with_env_filter(filter).with_target(false).init();
+}
 
 /// Process hook input: parse JSON and convert to AgentEvent.
 ///
@@ -18,10 +26,12 @@ pub fn process_hook_input(input: &str) -> Result<AgentEvent, String> {
 }
 
 fn main() {
+    init_tracing();
+
     // Read JSON from stdin
     let mut input = String::new();
     if let Err(e) = std::io::stdin().read_to_string(&mut input) {
-        eprintln!("aura-claude-code-hook: failed to read stdin: {e}");
+        error!("failed to read stdin: {e}");
         std::process::exit(1);
     }
 
@@ -29,14 +39,14 @@ fn main() {
     let event = match process_hook_input(&input) {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("aura-claude-code-hook: {e}");
+            error!("{e}");
             std::process::exit(1);
         }
     };
 
     // Send to daemon via IPC (fail gracefully if daemon not running)
     if let Err(e) = send_to_daemon(&event) {
-        eprintln!("aura-claude-code-hook: {e}");
+        error!("{e}");
         // Exit 0 so Claude Code doesn't fail
     }
 }

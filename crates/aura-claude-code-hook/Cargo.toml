@@ -13,3 +13,5 @@ path = "src/main.rs"
 [dependencies]
 aura-common.workspace = true
 serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

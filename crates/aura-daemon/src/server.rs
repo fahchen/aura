@@ -5,6 +5,7 @@ use aura_common::{socket_path, IpcMessage, IpcResponse};
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
+use tracing::{error, info, warn};
 
 /// Handle a parsed IPC message and update the registry.
 ///
@@ -46,7 +47,7 @@ pub async fn run(registry: Arc<Mutex<SessionRegistry>>) -> std::io::Result<()> {
     }
 
     let listener = UnixListener::bind(&path)?;
-    eprintln!("aura: listening on {}", path.display());
+    info!("listening on {}", path.display());
 
     loop {
         match listener.accept().await {
@@ -54,12 +55,12 @@ pub async fn run(registry: Arc<Mutex<SessionRegistry>>) -> std::io::Result<()> {
                 let registry = Arc::clone(&registry);
                 tokio::spawn(async move {
                     if let Err(e) = handle_connection(stream, registry).await {
-                        eprintln!("aura: connection error: {e}");
+                        warn!("connection error: {e}");
                     }
                 });
             }
             Err(e) => {
-                eprintln!("aura: accept error: {e}");
+                error!("accept error: {e}");
             }
         }
     }
@@ -163,7 +164,7 @@ mod tests {
     }
 
     #[test]
-    fn handle_message_tool_completed_removes_tool() {
+    fn handle_message_tool_completed_moves_to_recent() {
         let registry = create_registry();
 
         // Setup: session with a running tool
@@ -195,7 +196,9 @@ mod tests {
 
         assert!(matches!(response, IpcResponse::Ok));
         let sessions = registry.lock().unwrap().get_all();
-        assert_eq!(sessions[0].running_tools.len(), 0);
+        // Tool should still be visible via recent_tools (minimum display duration)
+        assert_eq!(sessions[0].running_tools.len(), 1);
+        assert!(sessions[0].running_tools[0].tool_id.starts_with("recent_"));
     }
 
     // ==================== parse_and_handle_message tests ====================

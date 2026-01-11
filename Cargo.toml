@@ -19,6 +19,13 @@ tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "net", "io-u
 # Error handling
 thiserror = "2.0"
 
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
 # UI
 gpui = "0.2"
 

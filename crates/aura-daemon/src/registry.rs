@@ -2,7 +2,18 @@
 
 use aura_common::{AgentEvent, AgentType, RunningTool, SessionInfo, SessionState};
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use tracing::{debug, info, trace};
+
+/// Minimum duration to keep completed tools visible
+const MIN_TOOL_DISPLAY: Duration = Duration::from_secs(1);
+
+/// A tool that was recently completed but should remain visible briefly
+#[derive(Debug, Clone)]
+pub struct RecentTool {
+    pub tool_name: String,
+    pub expires_at: Instant,
+}
 
 /// Session data tracked by the daemon
 #[derive(Debug)]
@@ -12,6 +23,7 @@ pub struct Session {
     pub agent: AgentType,
     pub state: SessionState,
     pub running_tools: Vec<RunningTool>,
+    pub recent_tools: Vec<RecentTool>,
     pub last_activity: Instant,
 }
 
@@ -23,6 +35,7 @@ impl Session {
             agent,
             state: SessionState::Running,
             running_tools: Vec::new(),
+            recent_tools: Vec::new(),
             last_activity: Instant::now(),
         }
     }
@@ -32,11 +45,23 @@ impl Session {
     }
 
     pub fn to_info(&self) -> SessionInfo {
+        // Combine running tools + non-expired recent tools
+        let now = Instant::now();
+        let mut tools = self.running_tools.clone();
+        for recent in &self.recent_tools {
+            if recent.expires_at > now {
+                tools.push(RunningTool {
+                    tool_id: format!("recent_{}", recent.tool_name),
+                    tool_name: recent.tool_name.clone(),
+                });
+            }
+        }
+
         SessionInfo {
             session_id: self.session_id.clone(),
             cwd: self.cwd.clone(),
             state: self.state,
-            running_tools: self.running_tools.clone(),
+            running_tools: tools,
         }
     }
 }
@@ -52,6 +77,20 @@ impl SessionRegistry {
         Self::default()
     }
 
+    /// Get existing session or create a new one for late-joining sessions
+    fn get_or_create_session(&mut self, session_id: &str, cwd: Option<&str>) -> &mut Session {
+        if !self.sessions.contains_key(session_id) {
+            info!(%session_id, "late session registration");
+            let session = Session::new(
+                session_id.to_string(),
+                cwd.unwrap_or("unknown").to_string(),
+                AgentType::ClaudeCode,
+            );
+            self.sessions.insert(session_id.to_string(), session);
+        }
+        self.sessions.get_mut(session_id).unwrap()
+    }
+
     /// Process an agent event and update session state
     pub fn process_event(&mut self, event: AgentEvent) {
         match event {
@@ -60,17 +99,18 @@ impl SessionRegistry {
                 cwd,
                 agent,
             } => {
+                info!(%session_id, %cwd, ?agent, "session started");
                 let session = Session::new(session_id.clone(), cwd, agent);
                 self.sessions.insert(session_id, session);
             }
 
             AgentEvent::Activity { session_id } => {
-                if let Some(session) = self.sessions.get_mut(&session_id) {
-                    session.touch();
-                    // Only update state if not in Attention or Compacting
-                    if session.state == SessionState::Idle || session.state == SessionState::Stale {
-                        session.state = SessionState::Running;
-                    }
+                trace!(%session_id, "activity");
+                let session = self.get_or_create_session(&session_id, None);
+                session.touch();
+                // Only update state if not in Attention or Compacting
+                if session.state == SessionState::Idle || session.state == SessionState::Stale {
+                    session.state = SessionState::Running;
                 }
             }
 
@@ -79,20 +119,27 @@ impl SessionRegistry {
                 tool_id,
                 tool_name,
             } => {
-                if let Some(session) = self.sessions.get_mut(&session_id) {
-                    session.touch();
-                    session.state = SessionState::Running;
-                    session.running_tools.push(RunningTool { tool_id, tool_name });
-                }
+                debug!(%session_id, %tool_name, "tool started");
+                let session = self.get_or_create_session(&session_id, None);
+                session.touch();
+                session.state = SessionState::Running;
+                session.running_tools.push(RunningTool { tool_id, tool_name });
             }
 
             AgentEvent::ToolCompleted {
                 session_id,
                 tool_id,
             } => {
-                if let Some(session) = self.sessions.get_mut(&session_id) {
-                    session.touch();
-                    session.running_tools.retain(|t| t.tool_id != tool_id);
+                debug!(%session_id, %tool_id, "tool completed");
+                let session = self.get_or_create_session(&session_id, None);
+                session.touch();
+                // Move to recent_tools for minimum display duration
+                if let Some(pos) = session.running_tools.iter().position(|t| t.tool_id == tool_id) {
+                    let tool = session.running_tools.remove(pos);
+                    session.recent_tools.push(RecentTool {
+                        tool_name: tool.tool_name,
+                        expires_at: Instant::now() + MIN_TOOL_DISPLAY,
+                    });
                 }
             }
 
@@ -100,37 +147,41 @@ impl SessionRegistry {
                 session_id,
                 message: _,
             } => {
-                if let Some(session) = self.sessions.get_mut(&session_id) {
-                    session.touch();
-                    session.state = SessionState::Attention;
-                }
+                info!(%session_id, "needs attention");
+                let session = self.get_or_create_session(&session_id, None);
+                session.touch();
+                session.state = SessionState::Attention;
             }
 
             AgentEvent::Compacting { session_id } => {
-                if let Some(session) = self.sessions.get_mut(&session_id) {
-                    session.touch();
-                    session.state = SessionState::Compacting;
-                }
+                info!(%session_id, "compacting");
+                let session = self.get_or_create_session(&session_id, None);
+                session.touch();
+                session.state = SessionState::Compacting;
             }
 
             AgentEvent::Idle { session_id } => {
-                if let Some(session) = self.sessions.get_mut(&session_id) {
-                    session.touch();
-                    session.state = SessionState::Idle;
-                    session.running_tools.clear();
-                }
+                debug!(%session_id, "idle");
+                let session = self.get_or_create_session(&session_id, None);
+                session.touch();
+                session.state = SessionState::Idle;
+                session.running_tools.clear();
             }
 
             AgentEvent::SessionEnded { session_id } => {
+                info!(%session_id, "session ended");
                 self.sessions.remove(&session_id);
             }
         }
     }
 
     /// Mark sessions as stale if no activity for the given duration
-    pub fn mark_stale(&mut self, timeout: std::time::Duration) {
+    pub fn mark_stale(&mut self, timeout: Duration) {
         let now = Instant::now();
         for session in self.sessions.values_mut() {
+            // Clean up expired recent tools
+            session.recent_tools.retain(|t| t.expires_at > now);
+
             if now.duration_since(session.last_activity) > timeout {
                 // Only mark stale if not already in a terminal state
                 if session.state != SessionState::Idle {
@@ -184,13 +235,15 @@ mod tests {
         let sessions = registry.get_all();
         assert_eq!(sessions[0].running_tools.len(), 1);
 
-        // Tool completed
+        // Tool completed - tool moves to recent_tools and stays visible
         registry.process_event(AgentEvent::ToolCompleted {
             session_id: "s1".into(),
             tool_id: "t1".into(),
         });
         let sessions = registry.get_all();
-        assert_eq!(sessions[0].running_tools.len(), 0);
+        // Tool should still be visible due to MIN_TOOL_DISPLAY
+        assert_eq!(sessions[0].running_tools.len(), 1);
+        assert!(sessions[0].running_tools[0].tool_id.starts_with("recent_"));
 
         // Idle
         registry.process_event(AgentEvent::Idle {
@@ -268,31 +321,98 @@ mod tests {
         let sessions = registry.get_all();
         assert_eq!(sessions[0].running_tools.len(), 2);
 
-        // Complete one
+        // Complete one - it moves to recent_tools but still visible
         registry.process_event(AgentEvent::ToolCompleted {
             session_id: "s1".into(),
             tool_id: "t1".into(),
         });
 
         let sessions = registry.get_all();
-        assert_eq!(sessions[0].running_tools.len(), 1);
-        assert_eq!(sessions[0].running_tools[0].tool_name, "Bash");
+        // Should have 2 tools: "Bash" (running) + "Read" (recent)
+        assert_eq!(sessions[0].running_tools.len(), 2);
+        // Find the still-running tool
+        let running_bash = sessions[0]
+            .running_tools
+            .iter()
+            .find(|t| t.tool_name == "Bash" && t.tool_id == "t2");
+        assert!(running_bash.is_some());
     }
 
     #[test]
-    fn unknown_session_ignored() {
+    fn unknown_session_auto_created() {
         let mut registry = SessionRegistry::new();
 
-        // Events for unknown session should be ignored
-        registry.process_event(AgentEvent::Activity {
-            session_id: "unknown".into(),
-        });
+        // Events for unknown session should auto-create the session
         registry.process_event(AgentEvent::ToolStarted {
-            session_id: "unknown".into(),
+            session_id: "late".into(),
             tool_id: "t1".into(),
             tool_name: "Read".into(),
         });
 
-        assert_eq!(registry.len(), 0);
+        assert_eq!(registry.len(), 1);
+        let sessions = registry.get_all();
+        assert_eq!(sessions[0].session_id, "late");
+        assert_eq!(sessions[0].cwd, "unknown");
+        assert_eq!(sessions[0].running_tools.len(), 1);
+    }
+
+    #[test]
+    fn minimum_tool_display_duration() {
+        let mut registry = SessionRegistry::new();
+
+        registry.process_event(AgentEvent::SessionStarted {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            agent: AgentType::ClaudeCode,
+        });
+
+        // Start and immediately complete a tool
+        registry.process_event(AgentEvent::ToolStarted {
+            session_id: "s1".into(),
+            tool_id: "t1".into(),
+            tool_name: "Read".into(),
+        });
+        registry.process_event(AgentEvent::ToolCompleted {
+            session_id: "s1".into(),
+            tool_id: "t1".into(),
+        });
+
+        // Tool should still be visible immediately after completion
+        let sessions = registry.get_all();
+        assert_eq!(sessions[0].running_tools.len(), 1);
+        assert_eq!(sessions[0].running_tools[0].tool_name, "Read");
+        assert!(sessions[0].running_tools[0].tool_id.starts_with("recent_"));
+
+        // Verify the internal recent_tools has the expiration set
+        let session = registry.sessions.get("s1").unwrap();
+        assert_eq!(session.running_tools.len(), 0); // actual running_tools is empty
+        assert_eq!(session.recent_tools.len(), 1);
+        assert!(session.recent_tools[0].expires_at > Instant::now());
+    }
+
+    #[test]
+    fn recent_tools_cleanup_on_mark_stale() {
+        let mut registry = SessionRegistry::new();
+
+        registry.process_event(AgentEvent::SessionStarted {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            agent: AgentType::ClaudeCode,
+        });
+
+        // Manually add an expired recent tool
+        {
+            let session = registry.sessions.get_mut("s1").unwrap();
+            session.recent_tools.push(RecentTool {
+                tool_name: "OldTool".into(),
+                expires_at: Instant::now() - Duration::from_secs(10),
+            });
+        }
+
+        // mark_stale should clean up expired recent tools
+        registry.mark_stale(Duration::from_secs(60));
+
+        let session = registry.sessions.get("s1").unwrap();
+        assert_eq!(session.recent_tools.len(), 0);
     }
 }
