@@ -3,12 +3,8 @@
 //! Receives events from hook handlers, tracks session state,
 //! and renders the notch-flanking HUD icons.
 
-mod registry;
-mod server;
-mod ui;
-
+use aura_daemon::{registry::SessionRegistry, server, ui};
 use clap::Parser;
-use registry::SessionRegistry;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::{debug, error};

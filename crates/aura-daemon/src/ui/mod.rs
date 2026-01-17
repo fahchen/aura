@@ -1,319 +1,61 @@
 //! HUD UI module - gpui-based status display
 //!
 //! Architecture:
+//! - Two separate popup windows: Indicator (36x36) and Session List (320xN)
 //! - assets.rs: SVG icon asset source
-//! - indicator.rs: Collapsed single-icon view (Nerd Font glyph with gloss effect)
+//! - indicator.rs: Single centered icon showing aggregate state
 //! - session_list.rs: Expanded session row rendering
 //! - animation.rs: Tool cycling, marquee, and shake animations
 //! - icons.rs: Icon paths and colors
 
 mod animation;
-mod assets;
-mod icons;
-mod indicator;
-mod session_list;
+pub mod assets;
+pub mod icons;
+pub mod indicator;
+pub mod session_list;
+
+#[cfg(test)]
+mod visual_tests;
+
+/// Visual test helpers - available when `visual-tests` feature is enabled
+/// or when running tests
+#[cfg(any(feature = "visual-tests", test))]
+pub mod visual_test_helpers;
 
 use animation::{
-    calculate_animation_state, calculate_marquee_offset, MARQUEE_CHAR_WIDTH,
-    MARQUEE_SPEED_PX_PER_SEC, RESET_DURATION_MS,
+    calculate_animation_state, calculate_breathe_opacity, calculate_icon_swap,
+    calculate_row_slide_in, calculate_row_slide_out,
 };
 use assets::Assets;
-use aura_common::SessionInfo;
+use aura_common::{SessionInfo, SessionState};
 use crate::registry::SessionRegistry;
 use gpui::{
     actions, div, point, px, size, App, AppContext, Application, Bounds, Context, Entity,
-    InteractiveElement, IntoElement, Menu, MenuItem, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Window, WindowBackgroundAppearance, WindowBounds,
-    WindowKind, WindowOptions,
+    InteractiveElement, IntoElement, Menu, MenuItem, ParentElement, Pixels, Point, Render,
+    SharedString, StatefulInteractiveElement, Styled, Window, WindowBackgroundAppearance,
+    WindowBounds, WindowHandle, WindowKind, WindowOptions,
+    prelude::FluentBuilder,
 };
 use session_list::{
-    calculate_expanded_height, extract_session_name, ROW_GAP, SESSION_NAME_WIDTH,
+    calculate_expanded_height, extract_session_name, ROW_GAP,
     WIDTH as EXPANDED_WIDTH, MAX_SESSIONS,
 };
 use indicator::{HEIGHT as COLLAPSED_HEIGHT, WIDTH as COLLAPSED_WIDTH};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use unicode_width::UnicodeWidthStr;
 
 // Define application actions
 actions!(aura, [Quit]);
 
-/// Collapse delay duration
-const COLLAPSE_DELAY: Duration = Duration::from_millis(3000);
+/// Gap between indicator and session list windows
+const WINDOW_GAP: f32 = 4.0;
 
 
-/// Animation state for a session row's marquee
-#[derive(Clone, Default)]
-enum RowMarqueeState {
-    /// Not scrolling, at offset 0
-    #[default]
-    Idle,
-    /// Scrolling while hovered
-    Scrolling { start: Instant },
-    /// Resetting back to offset 0 with ease animation
-    Resetting { start: Instant, from_offset: f32 },
-}
-
-/// Manages per-row marquee animation state
-#[derive(Default)]
-struct MarqueeAnimator {
-    /// Per-row marquee animation state (session_id -> state)
-    row_states: HashMap<String, RowMarqueeState>,
-}
-
-impl MarqueeAnimator {
-    /// Clean up completed reset animations by transitioning Resetting -> Idle
-    fn cleanup_completed_resets(&mut self) {
-        let reset_duration = Duration::from_millis(RESET_DURATION_MS);
-        for state in self.row_states.values_mut() {
-            if let RowMarqueeState::Resetting { start, .. } = state
-                && start.elapsed() >= reset_duration
-            {
-                *state = RowMarqueeState::Idle;
-            }
-        }
-    }
-
-    /// Handle hover state change for a session row's marquee animation
-    fn handle_row_hover(&mut self, session_id: String, needs_marquee: bool, hovered: bool) {
-        if hovered && needs_marquee {
-            // Only start scrolling if text actually overflows
-            self.row_states.insert(
-                session_id,
-                RowMarqueeState::Scrolling {
-                    start: Instant::now(),
-                },
-            );
-        } else if !hovered {
-            // Only animate reset if we were actually scrolling
-            if let Some(RowMarqueeState::Scrolling { start }) = self.row_states.get(&session_id) {
-                let from_offset = -(start.elapsed().as_secs_f32() * MARQUEE_SPEED_PX_PER_SEC);
-                self.row_states.insert(
-                    session_id,
-                    RowMarqueeState::Resetting {
-                        start: Instant::now(),
-                        from_offset,
-                    },
-                );
-            }
-        }
-    }
-
-    /// Calculate marquee offset and scrolling state for a session row
-    fn calculate_state(&self, session_id: &str, session_name: &str) -> (f32, bool) {
-        let marquee_state = self
-            .row_states
-            .get(session_id)
-            .cloned()
-            .unwrap_or_default();
-
-        // Use unicode-width for accurate width calculation
-        let display_width = session_name.width();
-        let estimated_text_width = display_width as f32 * MARQUEE_CHAR_WIDTH;
-        let needs_marquee = estimated_text_width > SESSION_NAME_WIDTH;
-
-        match &marquee_state {
-            RowMarqueeState::Idle => (0.0, false),
-            RowMarqueeState::Scrolling { start } if needs_marquee => (
-                calculate_marquee_offset(estimated_text_width, SESSION_NAME_WIDTH, *start),
-                true,
-            ),
-            RowMarqueeState::Scrolling { .. } => (0.0, false),
-            RowMarqueeState::Resetting { start, from_offset } => {
-                let offset = session_list::calculate_reset_offset(
-                    *from_offset,
-                    start.elapsed().as_millis(),
-                );
-                (offset, false)
-            }
-        }
-    }
-
-    /// Check if text needs marquee animation based on width
-    fn needs_marquee(session_name: &str) -> bool {
-        let display_width = session_name.width();
-        let estimated_text_width = display_width as f32 * MARQUEE_CHAR_WIDTH;
-        estimated_text_width > SESSION_NAME_WIDTH
-    }
-}
-
-/// HUD view showing session rows
-struct HudView {
-    state: Entity<HudStateModel>,
-    is_expanded: bool,
-    is_hovered: bool,
-    /// Time when mouse left the window (for delayed collapse)
-    hover_left_at: Option<Instant>,
-    /// Last known session count (for resize detection)
-    last_session_count: usize,
-    /// Per-row marquee animation manager
-    marquee: MarqueeAnimator,
-}
-
-impl HudView {
-    fn set_expanded(&mut self, expanded: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.is_expanded == expanded {
-            return;
-        }
-        self.is_expanded = expanded;
-
-        // Calculate new window size
-        let num_sessions = self.state.read(cx).sessions.len().min(MAX_SESSIONS);
-        let (width, height) = if expanded {
-            (EXPANDED_WIDTH, calculate_expanded_height(num_sessions))
-        } else {
-            (COLLAPSED_WIDTH, COLLAPSED_HEIGHT)
-        };
-
-        // Resize window
-        window.resize(size(px(width), px(height)));
-        cx.notify();
-    }
-
-    /// Derive whether we should be expanded based on current state
-    fn should_be_expanded(&self, has_sessions: bool) -> bool {
-        if !has_sessions {
-            return false;
-        }
-
-        // Hovered -> stay expanded
-        if self.is_hovered {
-            return true;
-        }
-
-        match self.hover_left_at {
-            // Mouse left - check if delay expired
-            Some(left_at) => left_at.elapsed() < COLLAPSE_DELAY,
-            // Mouse never entered - stay expanded (expand on event)
-            None => true,
-        }
-    }
-
-    /// Render a session row with hover-based marquee scrolling
-    fn render_session_row(
-        &self,
-        session: &SessionInfo,
-        tool_index: usize,
-        fade_progress: f32,
-        animation_start: Instant,
-        cx: &mut Context<Self>,
-    ) -> gpui::Stateful<gpui::Div> {
-        let session_id = session.session_id.clone();
-        let session_name = session
-            .name
-            .clone()
-            .unwrap_or_else(|| extract_session_name(&session.cwd));
-        let (marquee_offset, is_scrolling) =
-            self.marquee.calculate_state(&session_id, &session_name);
-
-        let needs_marquee = MarqueeAnimator::needs_marquee(&session_name);
-        let session_id_for_hover = session_id.clone();
-
-        div()
-            .id(SharedString::from(format!("session-row-{}", session_id)))
-            .on_hover(cx.listener(move |this, hovered: &bool, _window, _cx| {
-                this.marquee
-                    .handle_row_hover(session_id_for_hover.clone(), needs_marquee, *hovered);
-            }))
-            .child(session_list::render_row_content(
-                session.state,
-                &session_name,
-                &session.running_tools,
-                tool_index,
-                fade_progress,
-                marquee_offset,
-                is_scrolling,
-                animation_start,
-            ))
-    }
-}
-
-impl Render for HudView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Request continuous animation frames (for smooth animation + registry polling)
-        window.request_animation_frame();
-
-        // Refresh sessions from registry on each frame
-        self.state.update(cx, |state, _cx| {
-            state.refresh_from_registry();
-        });
-
-        // Update hover state from window
-        let window_hovered = window.is_window_hovered();
-        if window_hovered != self.is_hovered {
-            if window_hovered {
-                // Mouse entered
-                self.hover_left_at = None;
-            } else {
-                // Mouse left - start collapse delay
-                self.hover_left_at = Some(Instant::now());
-            }
-            self.is_hovered = window_hovered;
-        }
-
-        // Derive and apply expansion state
-        let has_sessions = !self.state.read(cx).sessions.is_empty();
-        let should_expand = self.should_be_expanded(has_sessions);
-        if should_expand != self.is_expanded {
-            self.set_expanded(should_expand, window, cx);
-        }
-
-        // Clean up completed reset animations (Resetting -> Idle when done)
-        self.marquee.cleanup_completed_resets();
-
-        let hud_state = self.state.read(cx);
-        let sessions = &hud_state.sessions;
-        let is_expanded = self.is_expanded;
-
-        // Resize window if session count changed while expanded
-        let current_count = sessions.len().min(MAX_SESSIONS);
-        if is_expanded && current_count != self.last_session_count {
-            self.last_session_count = current_count;
-            let height = calculate_expanded_height(current_count);
-            window.resize(size(px(EXPANDED_WIDTH), px(height)));
-        }
-
-        // Calculate animation state (shared across all sessions for sync switching)
-        let animation_start = hud_state.animation_start;
-        let (tool_index, fade_progress) =
-            calculate_animation_state(animation_start, hud_state.animation_seed);
-
-        // Clone data needed for rendering (status_bar handles empty case with sleep icon)
-        let sessions_for_render: Vec<_> = sessions.iter().take(MAX_SESSIONS).cloned().collect();
-
-        // Container for HUD content
-        div()
-            .id("hud-container")
-            .size_full()
-            .cursor_pointer()
-            .child(if is_expanded && !sessions_for_render.is_empty() {
-                // Expanded view: full session list with glass background
-                div()
-                    .size_full()
-                    .flex()
-                    .flex_col()
-                    .gap(px(ROW_GAP))
-                    .p(px(6.0))
-                    .rounded(px(8.0))
-                    .bg(gpui::rgba(0xFFFFFF40)) // Glass: semi-transparent white
-                    .children(
-                        sessions_for_render
-                            .iter()
-                            .map(|session| self.render_session_row(session, tool_index, fade_progress, animation_start, cx)),
-                    )
-                    .into_any_element()
-            } else {
-                // Collapsed view: single icon (also used when no sessions)
-                indicator::render(&sessions_for_render, animation_start).into_any_element()
-            })
-    }
-}
-
-/// Shared HUD state model
-struct HudStateModel {
+/// Shared HUD state between indicator and session list windows
+struct SharedHudState {
     /// Current sessions to display (refreshed from registry)
     sessions: Vec<SessionInfo>,
     /// Animation start time for time-based tool cycling
@@ -322,9 +64,17 @@ struct HudStateModel {
     animation_seed: u64,
     /// Registry reference for refreshing session data
     registry: Arc<Mutex<SessionRegistry>>,
+    /// Whether the session list window should be visible
+    session_list_visible: bool,
+    /// Session list window handle (for tracking open/close state)
+    session_list_window: Option<WindowHandle<SessionListView>>,
+    /// Session list window origin position (for reopening at same location)
+    session_list_origin: Point<Pixels>,
+    /// Indicator window handle (for getting current position)
+    indicator_window: Option<WindowHandle<IndicatorView>>,
 }
 
-impl HudStateModel {
+impl SharedHudState {
     /// Refresh sessions from registry
     fn refresh_from_registry(&mut self) {
         if let Ok(registry) = self.registry.lock() {
@@ -333,7 +83,486 @@ impl HudStateModel {
     }
 }
 
-/// Run the HUD application
+/// Indicator window view (36x36px, always visible)
+struct IndicatorView {
+    state: Entity<SharedHudState>,
+    /// Track hover state for enhanced visual effect
+    is_hovered: bool,
+    /// Track window position at mouse down (for drag detection)
+    window_pos_at_mouse_down: Option<Point<Pixels>>,
+}
+
+impl Render for IndicatorView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Request continuous animation frames
+        window.request_animation_frame();
+
+        // Refresh sessions from registry on each frame
+        self.state.update(cx, |state, _cx| {
+            state.refresh_from_registry();
+        });
+
+        let hud_state = self.state.read(cx);
+        let sessions = &hud_state.sessions;
+        let animation_start = hud_state.animation_start;
+        let sessions_for_render: Vec<_> = sessions.iter().take(MAX_SESSIONS).cloned().collect();
+
+        let is_hovered = self.is_hovered;
+
+        // Indicator container with click and drag support
+        div()
+            .id("indicator-container")
+            .size_full()
+            .cursor(gpui::CursorStyle::OpenHand)
+            .on_hover(cx.listener(|this, hovered: &bool, _window, _cx| {
+                this.is_hovered = *hovered;
+            }))
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|this, _event: &gpui::MouseDownEvent, window, _cx| {
+                    // Record window position before drag starts
+                    this.window_pos_at_mouse_down = Some(window.bounds().origin);
+                    // Start window drag on mouse down
+                    window.start_window_move();
+                }),
+            )
+            .on_click({
+                let state_for_click = self.state.clone();
+                cx.listener(move |this, _event: &gpui::ClickEvent, window, app| {
+                    // Check if window moved (was dragged)
+                    if let Some(start_pos) = this.window_pos_at_mouse_down.take() {
+                        let current_pos = window.bounds().origin;
+                        let threshold = px(5.0);
+                        let dx = current_pos.x - start_pos.x;
+                        let dy = current_pos.y - start_pos.y;
+                        if dx > threshold || dx < -threshold || dy > threshold || dy < -threshold {
+                            // Window was dragged, don't toggle
+                            return;
+                        }
+                    }
+
+                    let hud_state = state_for_click.read(app);
+                    let has_sessions = !hud_state.sessions.is_empty();
+                    let was_visible = hud_state.session_list_visible;
+
+                    // Only allow opening if there are sessions
+                    if !was_visible && !has_sessions {
+                        return; // No sessions, don't open
+                    }
+
+                    let should_open = !was_visible && hud_state.session_list_window.is_none();
+                    let _ = hud_state;
+
+                    state_for_click.update(app, |state, _cx| {
+                        state.session_list_visible = !state.session_list_visible;
+                    });
+
+                    // If we need to show the window and it doesn't exist, open it
+                    if should_open {
+                        open_session_list_window_sync(app, state_for_click.clone());
+                    }
+                })
+            })
+            .child(indicator::render(&sessions_for_render, animation_start, is_hovered))
+    }
+}
+
+/// Session list window view (320px wide, shows/hides on demand)
+struct SessionListView {
+    state: Entity<SharedHudState>,
+    /// Last known session count (for resize detection)
+    last_session_count: usize,
+    /// Track when each session was first seen (for slide-in animation)
+    appeared_at: HashMap<String, Instant>,
+    /// Track hover start time per row for icon swap animation
+    icon_hover_at: HashMap<String, (Instant, bool)>,
+    /// Track sessions being removed with slide-out animation
+    /// Maps session_id -> (SessionInfo snapshot, removal start time)
+    removing: HashMap<String, (SessionInfo, Instant)>,
+    /// Cache of last known session info (for exit animation)
+    session_cache: HashMap<String, SessionInfo>,
+}
+
+impl SessionListView {
+    /// Render a session row with hover-based marquee scrolling and slide-in animation
+    fn render_session_row(
+        &mut self,
+        session: &SessionInfo,
+        tool_index: usize,
+        fade_progress: f32,
+        animation_start: Instant,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<gpui::Div> {
+        let session_id = session.session_id.clone();
+
+        // Track first appearance time for slide-in animation
+        let appeared_at = *self
+            .appeared_at
+            .entry(session_id.clone())
+            .or_insert_with(Instant::now);
+        let (slide_opacity, slide_x_offset) = calculate_row_slide_in(appeared_at);
+
+        let session_name = session
+            .name
+            .clone()
+            .unwrap_or_else(|| extract_session_name(&session.cwd));
+
+        let session_id_for_icon = session_id.clone();
+
+        // Get icon swap hover state - pass None when no hover history exists
+        let (icon_hover_start, icon_is_hovered) = self
+            .icon_hover_at
+            .get(&session_id)
+            .copied()
+            .map(|(start, hovered)| (Some(start), hovered))
+            .unwrap_or((None, false));
+        let (state_opacity, state_x, remove_opacity, remove_x) =
+            calculate_icon_swap(icon_hover_start, icon_is_hovered);
+
+        // State-based row opacity for visual hierarchy
+        let row_opacity = match session.state {
+            SessionState::Running => 1.0,
+            SessionState::Attention => 1.0,
+            SessionState::Compacting => 0.9,
+            SessionState::Idle => 0.7,
+            SessionState::Stale => calculate_breathe_opacity(animation_start),
+        };
+
+        // Session ID for remove click handler
+        let session_id_for_remove = session_id.clone();
+        let state_for_remove = self.state.clone();
+
+        // Check if remove icon is visible enough to be clickable
+        let remove_clickable = remove_opacity > 0.5;
+
+        div()
+            .id(SharedString::from(format!("session-row-{}", session_id)))
+            .relative() // For absolute positioning of remove overlay
+            .opacity(row_opacity * slide_opacity) // Combine state opacity with slide-in
+            .ml(px(slide_x_offset)) // Slide from left
+            .on_hover(cx.listener(move |this, hovered: &bool, _window, _cx| {
+                // Track hover timing for icon swap animation
+                let now = Instant::now();
+                if *hovered {
+                    // Starting hover
+                    this.icon_hover_at.insert(session_id_for_icon.clone(), (now, true));
+                } else {
+                    // Ending hover - keep the timestamp but mark as not hovered for reverse animation
+                    this.icon_hover_at.insert(session_id_for_icon.clone(), (now, false));
+                }
+            }))
+            .child(session_list::render_row_content(
+                session,
+                &session_name,
+                tool_index,
+                fade_progress,
+                animation_start,
+                state_opacity,
+                state_x,
+                remove_opacity,
+                remove_x,
+            ))
+            // Remove button overlay - positioned over the state icon area
+            // Only clickable when remove icon is visible (hover state)
+            .when(remove_clickable, |this| {
+                this.child(
+                    div()
+                        .id(SharedString::from(format!("remove-btn-{}", session_id_for_remove)))
+                        .absolute()
+                        .left(px(14.0)) // Row left padding
+                        .top(px(10.0)) // Row top padding
+                        .w(px(14.0)) // State icon width
+                        .h(px(14.0)) // State icon height
+                        .cursor(gpui::CursorStyle::PointingHand)
+                        .on_click(move |_event, _window, app| {
+                            // Remove session from registry
+                            state_for_remove.update(app, |state, _cx| {
+                                if let Ok(mut registry) = state.registry.lock() {
+                                    registry.remove_session(&session_id_for_remove);
+                                }
+                            });
+                        }),
+                )
+            })
+    }
+
+    /// Render a session row that is being removed (slide-out animation)
+    fn render_removing_row(
+        &self,
+        session: &SessionInfo,
+        removed_at: Instant,
+        tool_index: usize,
+        fade_progress: f32,
+        animation_start: Instant,
+    ) -> gpui::Div {
+        let _session_id = session.session_id.clone();
+        let session_name = session
+            .name
+            .clone()
+            .unwrap_or_else(|| extract_session_name(&session.cwd));
+
+        // Calculate slide-out animation
+        let (slide_opacity, slide_x_offset, _) = calculate_row_slide_out(removed_at);
+
+        // State-based row opacity
+        let row_opacity = match session.state {
+            SessionState::Running => 1.0,
+            SessionState::Attention => 1.0,
+            SessionState::Compacting => 0.9,
+            SessionState::Idle => 0.7,
+            SessionState::Stale => calculate_breathe_opacity(animation_start),
+        };
+
+        div()
+            .opacity(row_opacity * slide_opacity)
+            .ml(px(slide_x_offset)) // Slide right
+            .child(session_list::render_row_content(
+                session,
+                &session_name,
+                tool_index,
+                fade_progress,
+                animation_start,
+                1.0,   // State icon visible
+                0.0,   // No x offset
+                0.0,   // Remove icon hidden
+                -16.0, // Remove icon off-screen
+            ))
+    }
+}
+
+impl Render for SessionListView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Request continuous animation frames
+        window.request_animation_frame();
+
+        // Check visibility - if not visible, close the window entirely
+        let is_visible = self.state.read(cx).session_list_visible;
+        if !is_visible {
+            // Save current position before closing (for position persistence)
+            let current_origin = window.bounds().origin;
+            // Clear window handle and close this window
+            self.state.update(cx, |state, _cx| {
+                state.session_list_origin = current_origin;
+                state.session_list_window = None;
+            });
+            window.remove_window();
+            return div().size_full().into_any_element();
+        }
+
+        let hud_state = self.state.read(cx);
+        let sessions = &hud_state.sessions;
+        let animation_start = hud_state.animation_start;
+
+        // Resize window if session count changed
+        // Include removing sessions in count to prevent height jump during exit animation
+        let visible_count = (sessions.len() + self.removing.len()).min(MAX_SESSIONS);
+        if visible_count != self.last_session_count && visible_count > 0 {
+            self.last_session_count = visible_count;
+            let height = calculate_expanded_height(visible_count);
+            window.resize(size(px(EXPANDED_WIDTH), px(height)));
+        }
+
+        // Handle empty sessions case - close the window
+        if sessions.is_empty() {
+            // Save position and close window
+            let current_origin = window.bounds().origin;
+            self.state.update(cx, |state, _cx| {
+                state.session_list_origin = current_origin;
+                state.session_list_visible = false;
+                state.session_list_window = None;
+            });
+            window.remove_window();
+            return div().size_full().into_any_element();
+        }
+
+        // Calculate animation state
+        let (tool_index, fade_progress) =
+            calculate_animation_state(animation_start, hud_state.animation_seed);
+
+        let sessions_for_render: Vec<_> = sessions.iter().take(MAX_SESSIONS).cloned().collect();
+        let session_count = sessions_for_render.len();
+
+        // Build current session IDs set
+        let current_ids: std::collections::HashSet<_> = sessions_for_render
+            .iter()
+            .map(|s| s.session_id.clone())
+            .collect();
+
+        // Update session cache with current sessions (so we have info for exit animation)
+        for session in &sessions_for_render {
+            self.session_cache
+                .insert(session.session_id.clone(), session.clone());
+        }
+
+        // Detect sessions that have been removed (were in appeared_at but not in current)
+        // and add them to the removing list for exit animation
+        for (session_id, _) in &self.appeared_at {
+            if !current_ids.contains(session_id) && !self.removing.contains_key(session_id) {
+                // Get cached session info for exit animation
+                if let Some(session_info) = self.session_cache.get(session_id).cloned() {
+                    self.removing
+                        .insert(session_id.clone(), (session_info, Instant::now()));
+                }
+            }
+        }
+
+        // Clean up completed exit animations and their cache entries
+        let completed_removals: Vec<_> = self
+            .removing
+            .iter()
+            .filter(|(_, (_, removed_at))| calculate_row_slide_out(*removed_at).2)
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        for id in &completed_removals {
+            self.removing.remove(id);
+            self.session_cache.remove(id);
+        }
+
+        // Build session rows (needs mutable self for appeared_at tracking)
+        let session_rows: Vec<_> = sessions_for_render
+            .iter()
+            .map(|session| {
+                self.render_session_row(session, tool_index, fade_progress, animation_start, cx)
+            })
+            .collect();
+
+        // Build removing session rows (exit animation)
+        let removing_rows: Vec<_> = self
+            .removing
+            .iter()
+            .map(|(_, (session, removed_at))| {
+                self.render_removing_row(session, *removed_at, tool_index, fade_progress, animation_start)
+            })
+            .collect();
+
+        // Clean up appeared_at and icon_hover_at for sessions that no longer exist
+        self.appeared_at.retain(|id, _| current_ids.contains(id));
+        self.icon_hover_at.retain(|id, _| current_ids.contains(id));
+
+        // Session list container with 2-layer structure
+        // Note: gpui renders children in order, so later children appear on top
+        div()
+            .id("session-list-container")
+            .size_full()
+            .relative()
+            .rounded(px(icons::colors::WINDOW_RADIUS))
+            .overflow_hidden()
+            // Layer 1: Background (absolute, glass bg with border)
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .bg(icons::colors::CONTAINER_BG)
+                    .border_1()
+                    .border_color(icons::colors::BORDER)
+                    .rounded(px(icons::colors::WINDOW_RADIUS)),
+            )
+            // Layer 2: Header + Content (relative, same width as background)
+            .child(
+                div()
+                    .relative()
+                    .size_full()
+                    .rounded(px(icons::colors::WINDOW_RADIUS))
+                    .flex()
+                    .flex_col()
+                    // Header: draggable "N sessions" text at top
+                    .child(
+                        div()
+                            .id("session-list-header")
+                            .w_full()
+                            .h(px(28.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor(gpui::CursorStyle::OpenHand)
+                            .on_mouse_down(
+                                gpui::MouseButton::Left,
+                                |_event: &gpui::MouseDownEvent, window, _cx| {
+                                    window.start_window_move();
+                                },
+                            )
+                            .font_family("Maple Mono NF CN")
+                            .text_size(px(11.0))
+                            .font_weight(gpui::FontWeight::NORMAL)
+                            .text_color(icons::colors::TEXT_HEADER)
+                            .child(format!(
+                                "{} session{}",
+                                session_count,
+                                if session_count == 1 { "" } else { "s" }
+                            )),
+                    )
+                    // Content: session rows below header (full width)
+                    .child(
+                        div()
+                            .p(px(10.0))
+                            .flex_1()
+                            .rounded(px(icons::colors::WINDOW_RADIUS))
+                            .bg(icons::colors::CONTENT_BG) // 0.07 alpha
+                            .border_t_1() // Top border only
+                            .border_color(icons::colors::CONTENT_HIGHLIGHT) // Highlight effect
+                            .flex()
+                            .flex_col()
+                            .gap(px(ROW_GAP))
+                            .children(session_rows)
+                            .children(removing_rows),
+                    ),
+            )
+            .into_any_element()
+    }
+}
+
+/// Open the session list window synchronously
+///
+/// Called when user clicks indicator to show session list.
+/// Creates a new window positioned below the indicator's current position.
+fn open_session_list_window_sync(app: &mut App, state: Entity<SharedHudState>) {
+    // Use saved session list origin (persists across open/close cycles)
+    // Initial value is calculated relative to indicator at startup
+    let origin = state.read(app).session_list_origin;
+
+    let initial_height = calculate_expanded_height(1);
+    let list_bounds = Bounds {
+        origin,
+        size: size(px(EXPANDED_WIDTH), px(initial_height)),
+    };
+
+    let state_for_list = state.clone();
+    let window_handle = app
+        .open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(list_bounds)),
+                titlebar: None,
+                focus: false,
+                show: true,
+                kind: WindowKind::PopUp,
+                is_movable: true,
+                is_resizable: false,
+                window_background: WindowBackgroundAppearance::Transparent,
+                ..Default::default()
+            },
+            |_window, app| {
+                app.new(|_cx| SessionListView {
+                    state: state_for_list,
+                    last_session_count: 0,
+                    appeared_at: HashMap::new(),
+                    icon_hover_at: HashMap::new(),
+                    removing: HashMap::new(),
+                    session_cache: HashMap::new(),
+                })
+            },
+        )
+        .ok();
+
+    // Store window handle in shared state
+    if let Some(handle) = window_handle {
+        state.update(app, |state, _cx| {
+            state.session_list_window = Some(handle);
+        });
+    }
+}
+
+/// Run the HUD application with two separate windows
 ///
 /// This function blocks and runs the gpui event loop.
 /// Call from main thread only.
@@ -377,55 +606,64 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>) {
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0);
 
-        // Create shared state model with registry data
-        let hud_state = app.new(|_cx| HudStateModel {
+        // Position windows centered under notch
+        let window_x = (screen_width - px(EXPANDED_WIDTH)) / 2.0;
+        let window_y = px(30.0); // Just below menu bar
+
+        // Calculate session list origin (below indicator)
+        let session_list_origin = point(window_x, window_y + px(COLLAPSED_HEIGHT + WINDOW_GAP));
+
+        // Create shared state between both windows
+        let shared_state = app.new(|_cx| SharedHudState {
             sessions: initial_sessions,
             animation_start: Instant::now(),
             animation_seed,
             registry,
+            session_list_visible: false,
+            session_list_window: None,
+            session_list_origin,
+            indicator_window: None, // Will be set after window creation
         });
 
-        // Start with collapsed view, centered under notch
-        // Position so that when expanded, the window grows to the right
-        let window_x = (screen_width - px(EXPANDED_WIDTH)) / 2.0;
-        let window_y = px(30.0); // Just below menu bar
-
-        let window_bounds = Bounds {
-            origin: point(window_x, window_y),
+        // Create indicator window (always visible, 36x36)
+        let indicator_bounds = Bounds {
+            origin: point(window_x + px((EXPANDED_WIDTH - COLLAPSED_WIDTH) / 2.0), window_y),
             size: size(px(COLLAPSED_WIDTH), px(COLLAPSED_HEIGHT)),
         };
 
-        // Create HUD window (starts collapsed)
-        let state_for_window = hud_state.clone();
-        app.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(window_bounds)),
-                titlebar: None,
-                focus: true,
-                show: true,
-                kind: WindowKind::PopUp,
-                is_movable: true,
-                is_resizable: false,
-                window_background: WindowBackgroundAppearance::Transparent,
-                ..Default::default()
-            },
-            |_window, app| {
-                app.new(|_cx| HudView {
-                    state: state_for_window,
-                    is_expanded: false,
-                    is_hovered: false,
-                    hover_left_at: None,
-                    last_session_count: 0,
-                    marquee: MarqueeAnimator::default(),
-                })
-            },
-        )
-        .expect("Failed to open HUD window");
+        let state_for_indicator = shared_state.clone();
+        let indicator_handle = app
+            .open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(indicator_bounds)),
+                    titlebar: None,
+                    focus: false,
+                    show: true,
+                    kind: WindowKind::PopUp,
+                    is_movable: true,
+                    is_resizable: false,
+                    window_background: WindowBackgroundAppearance::Transparent,
+                    ..Default::default()
+                },
+                |_window, app| {
+                    app.new(|_cx| IndicatorView {
+                        state: state_for_indicator,
+                        is_hovered: false,
+                        window_pos_at_mouse_down: None,
+                    })
+                },
+            )
+            .expect("Failed to open indicator window");
 
-        // Note: Animation is time-based, calculated from animation_start in render.
-        // The UI will update when events occur. For continuous animation during
-        // fade transitions, we'd need to implement a render loop trigger.
-        // For now, the animation state is calculated on each render.
-        let _ = hud_state;
+        // Store indicator window handle in shared state
+        shared_state.update(app, |state, _cx| {
+            state.indicator_window = Some(indicator_handle);
+        });
+
+        // Session list window is opened on demand when user clicks indicator
+        // (see open_session_list_window function)
+
+        // Keep shared state alive
+        let _ = shared_state;
     });
 }

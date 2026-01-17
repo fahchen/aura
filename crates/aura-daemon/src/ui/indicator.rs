@@ -1,44 +1,50 @@
 //! Collapsed indicator view - single centered icon showing aggregate state
 //!
-//! The indicator shows a dark circle with a light cream icon:
+//! The indicator shows a liquid glass square with Lucide SVG icons:
 //! - Attention: bell_ring (bright icon, shaking animation)
-//! - Normal (sessions exist): robot (medium brightness, static)
-//! - No sessions: sleep (dim, static)
+//! - Running (sessions exist): cycles through 11 creative icons every 2500ms
+//! - No sessions: panda (dim, static)
 //!
 //! Visual design:
-//! - Dark semi-transparent circle background (high contrast)
-//! - Gloss overlay: top half of circle for depth
-//! - Icon: Nerd Font glyph in warm cream color
+//! - Liquid glass: translucent white background with border
+//! - Gloss overlay: top half for depth
+//! - Icon: Lucide SVG in white
 
-use super::animation::calculate_shake_offset;
+use super::animation::{calculate_shake_offset, ease_out};
 use super::icons;
 use aura_common::{SessionInfo, SessionState};
-use gpui::{div, px, Div, ParentElement, SharedString, Styled};
+use gpui::{div, px, svg, Div, ParentElement, Styled};
 use std::time::Instant;
 
-/// Circle size for the indicator
-const CIRCLE_SIZE: f32 = 28.0;
+/// Indicator dimensions (matching React prototype: 36x36px rounded square)
+const INDICATOR_SIZE: f32 = 36.0;
+const INDICATOR_BORDER_RADIUS: f32 = 12.0;
 
-/// Indicator dimensions (matches circle size exactly)
-pub const WIDTH: f32 = CIRCLE_SIZE;
-pub const HEIGHT: f32 = CIRCLE_SIZE;
+/// Indicator dimensions (exported for window sizing)
+pub const WIDTH: f32 = INDICATOR_SIZE;
+pub const HEIGHT: f32 = INDICATOR_SIZE;
 
-/// Icon font size within the circle (even number for proper centering)
-const ICON_FONT_SIZE: f32 = 12.0;
+/// Icon font size within the indicator (16px per prototype)
+const ICON_FONT_SIZE: f32 = 16.0;
 
-/// Nerd Font glyphs
-const GLYPH_BELL_RING: &str = "\u{f009e}"; // 󰂞
-const GLYPH_ROBOT: &str = "\u{f06a9}"; // 󰚩
-const GLYPH_SLEEP: &str = "\u{f04b2}"; // 󰒲
+/// Icon cycle interval in milliseconds (matches prototype: 2500ms)
+const ICON_CYCLE_MS: u64 = 2500;
+
+/// Icon transition duration in milliseconds (slide animation)
+const ICON_TRANSITION_MS: u64 = 400;
+
+/// SVG asset paths for static states
+const ICON_ATTENTION: &str = "icons/bell-ring.svg";
+const ICON_NO_SESSIONS: &str = "icons/panda.svg";
 
 /// Indicator state
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum IndicatorState {
-    /// Any session needs attention - shaking circle
+    /// Any session needs attention - shaking circle with bell icon
     Attention,
-    /// Sessions exist, no attention needed - static circle
-    Normal,
-    /// No sessions - low opacity circle
+    /// Sessions exist, no attention needed - cycling creative icons
+    Running,
+    /// No sessions - low opacity circle with sleep icon
     NoSessions,
 }
 
@@ -49,20 +55,67 @@ fn determine_state(sessions: &[SessionInfo]) -> IndicatorState {
     } else if sessions.iter().any(|s| s.state == SessionState::Attention) {
         IndicatorState::Attention
     } else {
-        IndicatorState::Normal
+        IndicatorState::Running
     }
 }
 
-/// Render the indicator with dark circle background and light cream icon
-pub fn render(sessions: &[SessionInfo], animation_start: Instant) -> Div {
+/// Get icon state for running animation - returns (current_icon, prev_icon, transition_progress)
+/// transition_progress: 0.0-1.0 during first 400ms of cycle, 1.0 after transition complete
+fn get_running_icon_state(animation_start: Instant) -> (&'static str, &'static str, f32) {
+    let elapsed_ms = animation_start.elapsed().as_millis() as u64;
+    let icon_count = icons::INDICATOR_RUNNING_ASSETS.len();
+
+    let cycle = (elapsed_ms / ICON_CYCLE_MS) as usize;
+    let pos_in_cycle = elapsed_ms % ICON_CYCLE_MS;
+
+    let current_idx = cycle % icon_count;
+    let prev_idx = if cycle == 0 {
+        icon_count - 1
+    } else {
+        (cycle - 1) % icon_count
+    };
+
+    let current_icon = icons::INDICATOR_RUNNING_ASSETS[current_idx];
+    let prev_icon = icons::INDICATOR_RUNNING_ASSETS[prev_idx];
+
+    let transition_progress = if pos_in_cycle < ICON_TRANSITION_MS {
+        pos_in_cycle as f32 / ICON_TRANSITION_MS as f32
+    } else {
+        1.0
+    };
+
+    (current_icon, prev_icon, transition_progress)
+}
+
+/// Render the indicator with liquid glass background and Lucide SVG icon
+///
+/// When `is_hovered` is true, applies enhanced visual effect:
+/// - Increased background opacity
+/// - Brighter gloss highlight
+pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bool) -> Div {
     let state = determine_state(sessions);
 
-    // Select glyph and opacity values based on state
-    // Dark circle background, light cream icon for high contrast
-    let (glyph, circle_bg_alpha, icon_alpha, gloss_alpha) = match state {
-        IndicatorState::Attention => (GLYPH_BELL_RING, 0.75, 1.0, 0.15),
-        IndicatorState::Normal => (GLYPH_ROBOT, 0.65, 0.95, 0.12),
-        IndicatorState::NoSessions => (GLYPH_SLEEP, 0.55, 0.75, 0.08),
+    // Get running icon state (may include transition)
+    let running_state = if state == IndicatorState::Running {
+        Some(get_running_icon_state(animation_start))
+    } else {
+        None
+    };
+
+    // Select SVG icon path and opacity values based on state
+    // Icon colors: white with varying alpha (Attention 0.95, Running 1.0, NoSessions 0.5)
+    // Background alpha: averaged from CSS gradient (0.15/0.05/0.1 -> ~0.10)
+    // On hover: enhance background +0.05, gloss +0.10 for visual feedback
+    let hover_bg_boost = if is_hovered { 0.05 } else { 0.0 };
+    let hover_gloss_boost = if is_hovered { 0.10 } else { 0.0 };
+
+    let (icon_path, circle_bg_alpha, icon_alpha, gloss_alpha) = match state {
+        IndicatorState::Attention => (ICON_ATTENTION, 0.12 + hover_bg_boost, 0.95, 0.06 + hover_gloss_boost),
+        IndicatorState::Running => {
+            let (current, _, _) = running_state.unwrap();
+            (current, 0.10 + hover_bg_boost, 1.0, 0.05 + hover_gloss_boost)
+        }
+        IndicatorState::NoSessions => (ICON_NO_SESSIONS, 0.08 + hover_bg_boost, 0.5, 0.03 + hover_gloss_boost),
     };
 
     // Calculate shake offset for attention state
@@ -72,18 +125,25 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant) -> Div {
         0.0
     };
 
-    // Glass background (semi-transparent white)
+    // Liquid glass background (translucent white)
     let circle_bg_color = gpui::Hsla {
         h: 0.0,
         s: 0.0,
         l: 1.0, // White
-        a: circle_bg_alpha * 0.4, // More transparent for glass effect
+        a: circle_bg_alpha,
     };
-    // Dark icon for contrast on glass
+    // Border color (white at 0.2 alpha per design spec)
+    let border_color = gpui::Hsla {
+        h: 0.0,
+        s: 0.0,
+        l: 1.0, // White
+        a: 0.2,
+    };
+    // White icon (per design spec - white with state-based alpha)
     let icon_color = gpui::Hsla {
         h: 0.0,
         s: 0.0,
-        l: 0.15, // Dark gray
+        l: 1.0, // White
         a: icon_alpha,
     };
     // Subtle white gloss for depth
@@ -94,44 +154,137 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant) -> Div {
         a: gloss_alpha,
     };
 
-    // Circle indicator (no outer container to avoid border artifacts)
+    // Rounded square indicator (36x36px with 12px border-radius per prototype)
     div()
-        .w(px(CIRCLE_SIZE))
-        .h(px(CIRCLE_SIZE))
-        .rounded_full()
+        .w(px(INDICATOR_SIZE))
+        .h(px(INDICATOR_SIZE))
+        .rounded(px(INDICATOR_BORDER_RADIUS))
         .bg(circle_bg_color)
+        .border_1()
+        .border_color(border_color)
         .relative()
         .overflow_hidden()
-        // Gloss highlight (top half)
+        // Gloss highlight (top half) - use explicit size, not w_full
         .child(
             div()
                 .absolute()
                 .top_0()
                 .left_0()
-                .w_full()
-                .h(px(CIRCLE_SIZE / 2.0))
+                .w(px(INDICATOR_SIZE))
+                .h(px(INDICATOR_SIZE / 2.0))
                 .bg(gloss_color),
         )
-        // Icon (centered using explicit size + flex, with shake animation)
+        // SVG Icon (centered, with shake animation for attention, slide for running)
         .child(
             div()
                 .absolute()
-                .inset_0()
+                .top_0()
+                .left_0()
+                .w(px(INDICATOR_SIZE))
+                .h(px(INDICATOR_SIZE))
                 .flex()
                 .items_center()
                 .justify_center()
+                .ml(px(shake_offset)) // Apply horizontal shake for attention
                 .child(
-                    div()
-                        .w(px(ICON_FONT_SIZE))
-                        .h(px(ICON_FONT_SIZE))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .ml(px(shake_offset)) // Apply horizontal shake for attention
-                        .font_family("Maple Mono NF CN")
-                        .text_size(px(ICON_FONT_SIZE))
-                        .text_color(icon_color)
-                        .child(SharedString::from(glyph)),
+                    if let Some((current_icon, prev_icon, transition_progress)) = running_state {
+                        if transition_progress < 1.0 {
+                            // During transition: show both icons sliding
+                            let eased = ease_out(transition_progress);
+                            let prev_offset = -eased * ICON_FONT_SIZE;
+                            let current_offset = (1.0 - eased) * ICON_FONT_SIZE;
+
+                            {
+                                let prev_alpha = icon_alpha * (1.0 - eased);
+                                let curr_alpha = icon_alpha * eased;
+
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .relative()
+                                    .w(px(ICON_FONT_SIZE))
+                                    .h(px(ICON_FONT_SIZE))
+                                    .overflow_hidden()
+                                    // Previous icon sliding out
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .top_0()
+                                            .left_0()
+                                            .w(px(ICON_FONT_SIZE))
+                                            .h(px(ICON_FONT_SIZE))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .ml(px(prev_offset))
+                                            .child(
+                                                svg()
+                                                    .path(prev_icon)
+                                                    .size(px(ICON_FONT_SIZE))
+                                                    .text_color(gpui::Hsla {
+                                                        h: 0.0,
+                                                        s: 0.0,
+                                                        l: 1.0,
+                                                        a: prev_alpha,
+                                                    }),
+                                            ),
+                                    )
+                                    // Current icon sliding in
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .top_0()
+                                            .left_0()
+                                            .w(px(ICON_FONT_SIZE))
+                                            .h(px(ICON_FONT_SIZE))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .ml(px(current_offset))
+                                            .child(
+                                                svg()
+                                                    .path(current_icon)
+                                                    .size(px(ICON_FONT_SIZE))
+                                                    .text_color(gpui::Hsla {
+                                                        h: 0.0,
+                                                        s: 0.0,
+                                                        l: 1.0,
+                                                        a: curr_alpha,
+                                                    }),
+                                            ),
+                                    )
+                            }
+                        } else {
+                            // No transition: single icon
+                            div()
+                                .w(px(ICON_FONT_SIZE))
+                                .h(px(ICON_FONT_SIZE))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    svg()
+                                        .path(icon_path)
+                                        .size(px(ICON_FONT_SIZE))
+                                        .text_color(icon_color),
+                                )
+                        }
+                    } else {
+                        // Non-running states: single icon
+                        div()
+                            .w(px(ICON_FONT_SIZE))
+                            .h(px(ICON_FONT_SIZE))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                svg()
+                                    .path(icon_path)
+                                    .size(px(ICON_FONT_SIZE))
+                                    .text_color(icon_color),
+                            )
+                    },
                 ),
         )
 }

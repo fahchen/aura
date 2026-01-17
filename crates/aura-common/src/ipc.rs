@@ -49,6 +49,15 @@ pub struct SessionInfo {
     /// Custom session name (if set by user)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Unix timestamp when stopped
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_at: Option<u64>,
+    /// Unix timestamp when became stale
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale_at: Option<u64>,
+    /// Tool requesting permission
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_tool: Option<String>,
 }
 
 /// A currently running tool
@@ -144,6 +153,9 @@ mod tests {
                 tool_label: Some("main.rs".into()),
             }],
             name: None,
+            stopped_at: None,
+            stale_at: None,
+            permission_tool: None,
         };
 
         let json = serde_json::to_string(&info).unwrap();

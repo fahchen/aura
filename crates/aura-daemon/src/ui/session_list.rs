@@ -1,100 +1,251 @@
 //! Session list rendering - expanded view with session rows
 //!
-//! Each row displays:
-//! - State icon (Nerd Font glyph, monochrome with opacity)
-//! - Session name (folder name from cwd, with marquee for long names)
-//! - Current tool with cross-fade animation
+//! Each row displays in two-line vertical layout:
+//! - Line 1 (header): State icon (16x16) + session name
+//! - Line 2 (event): Current tool with icon (or state-specific placeholder)
+//!
+//! Uses liquid glass theme with white text on translucent backgrounds.
 
-use super::animation::{
-    calculate_shake_offset, ease_in_out, ease_out, MARQUEE_CHAR_WIDTH, RESET_DURATION_MS,
-};
-use super::icons::{self, state_icons};
-use aura_common::{RunningTool, SessionState};
-use gpui::{div, px, Div, ParentElement, Styled};
+use super::animation::{calculate_shake_offset, ease_in_out};
+use super::icons::{self, colors};
+use aura_common::{RunningTool, SessionInfo, SessionState, PLACEHOLDER_TEXTS};
+use chrono::{DateTime, Local, Utc};
+use gpui::{div, px, svg, Div, InteractiveElement, ParentElement, Styled};
 use std::time::Instant;
-use unicode_width::UnicodeWidthStr;
 
 /// Session list dimensions
-pub const WIDTH: f32 = 424.0; // STATUS_DOT + NAME + TOOL + gaps(16) + padding(16)
-pub const ROW_HEIGHT: f32 = 32.0;
-pub const ROW_GAP: f32 = 4.0;
+pub const WIDTH: f32 = 320.0; // Match prototype width
+pub const ROW_HEIGHT: f32 = 56.0; // Two-line layout needs more height
+pub const ROW_GAP: f32 = 4.0; // Gap between session rows
 pub const MAX_SESSIONS: usize = 5;
 
-/// Column widths for table-style layout
-pub const STATUS_DOT_WIDTH: f32 = 18.0;
-pub const SESSION_NAME_WIDTH: f32 = 156.0; // 20 chars
-pub const TOOL_COLUMN_WIDTH: f32 = 218.4; // 28 chars
+/// Layout constants (matching React prototype)
+const STATE_ICON_SIZE: f32 = 14.0; // State icon in session row
+const HEADER_GAP: f32 = 8.0;
+const EVENT_PADDING_LEFT: f32 = 24.0; // Icon width (14) + gap (8) + 2 = align under name
 
-/// Render the content of a session row (status dot + name + tool)
+
+/// Render the content of a session row (two-line vertical layout)
+///
+/// Layout:
+/// ```
+/// .session-row {
+///   flex-direction: column;
+///   gap: 3px;
+///   padding: 10px 14px;
+/// }
+/// .session-header { // Line 1
+///   flex-direction: row;
+///   gap: 8px;
+///   // icon (16x16) + name
+/// }
+/// .session-event { // Line 2
+///   padding-left: 24px;  // Align under name (icon 16px + gap 8px)
+///   // tool or placeholder
+/// }
+/// ```
 ///
 /// Note: The outer wrapper with hover handler is created in mod.rs since
 /// it needs access to `cx.listener()` which is tied to HudView.
 pub fn render_row_content(
-    state: SessionState,
+    session: &SessionInfo,
     session_name: &str,
-    running_tools: &[RunningTool],
     tool_index: usize,
     fade_progress: f32,
-    marquee_offset: f32,
-    is_scrolling: bool,
     animation_start: Instant,
+    // Icon swap animation parameters
+    state_opacity: f32,
+    state_x: f32,
+    remove_opacity: f32,
+    remove_x: f32,
 ) -> Div {
-    // Use unicode-width for accurate width calculation (CJK = 2 units, ASCII = 1 unit)
-    let display_width = session_name.width();
-    let estimated_text_width = display_width as f32 * MARQUEE_CHAR_WIDTH;
-    let needs_marquee = estimated_text_width > SESSION_NAME_WIDTH;
-
     div()
         .w_full()
-        .h(px(ROW_HEIGHT))
+        .flex()
+        .flex_col()
+        .gap(px(3.0))
+        .px(px(14.0))
+        .py(px(10.0))
+        .rounded(px(colors::WINDOW_RADIUS))
+        .bg(colors::ROW_BG) // Subtle glass background
+        .hover(|style| style.bg(colors::ROW_HOVER_BG))
+        // Session header (Line 1): icon + name
+        .child(render_session_header(
+            session.state,
+            session_name,
+            animation_start,
+            state_opacity,
+            state_x,
+            remove_opacity,
+            remove_x,
+        ))
+        // Session event (Line 2): tool or placeholder
+        .child(render_session_event(session, tool_index, fade_progress))
+}
+
+/// Render the session header (Line 1): state icon + session name
+fn render_session_header(
+    state: SessionState,
+    session_name: &str,
+    animation_start: Instant,
+    state_opacity: f32,
+    state_x: f32,
+    remove_opacity: f32,
+    remove_x: f32,
+) -> Div {
+    div()
+        .w_full()
+        .h(px(18.0)) // Explicit height for h_full children
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(8.0))
-        .px(px(8.0))
-        .rounded(px(6.0))
-        // State icon column (fixed width, Nerd Font glyph with opacity + shake)
-        .child(render_state_indicator(state, animation_start))
-        // Session name column (fixed width with seamless marquee)
+        .gap(px(HEADER_GAP))
+        // State icon (fixed width, with opacity + shake)
+        .child(render_state_indicator(state, animation_start, state_opacity, state_x, remove_opacity, remove_x))
+        // Session name (with ellipsis truncation)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .font_family("Maple Mono NF CN")
+                .text_size(px(14.0))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(colors::TEXT_PRIMARY)
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(session_name.to_string()),
+        )
+}
+
+/// Render the session event (Line 2): tool or placeholder
+fn render_session_event(
+    session: &SessionInfo,
+    tool_index: usize,
+    fade_progress: f32,
+) -> Div {
+    div()
+        .w_full()
+        .flex()
+        .flex_row()
+        .items_center()
+        .pl(px(EVENT_PADDING_LEFT)) // Align under session name
+        .h(px(18.0)) // Fixed height to prevent layout jumps
+        .child(render_tool_or_placeholder(session, tool_index, fade_progress))
+}
+
+/// Format a Unix timestamp as "Jan 17, 14:30"
+fn format_datetime(unix_ts: u64) -> String {
+    let datetime = DateTime::<Utc>::from_timestamp(unix_ts as i64, 0).unwrap_or_else(Utc::now);
+    let local: DateTime<Local> = datetime.into();
+    local.format("%b %d, %H:%M").to_string()
+}
+
+/// Get a stable placeholder text for Running state based on session_id hash
+/// This prevents flickering that would occur if we used time-based random selection
+fn get_stable_placeholder(session_id: &str) -> &'static str {
+    // Use session_id hash for stable but varied selection
+    let hash = session_id.bytes().fold(0usize, |acc, b| {
+        acc.wrapping_mul(31).wrapping_add(b as usize)
+    });
+    let idx = hash % PLACEHOLDER_TEXTS.len();
+    PLACEHOLDER_TEXTS[idx]
+}
+
+/// Get state-specific placeholder text based on session state
+fn get_placeholder_text(session: &SessionInfo) -> String {
+    match session.state {
+        SessionState::Idle => {
+            if let Some(ts) = session.stopped_at {
+                format!("waiting since {}", format_datetime(ts))
+            } else {
+                "waiting...".to_string()
+            }
+        }
+        SessionState::Stale => {
+            if let Some(ts) = session.stale_at {
+                format!("inactive since {}", format_datetime(ts))
+            } else {
+                "inactive".to_string()
+            }
+        }
+        SessionState::Attention => {
+            let tool = session.permission_tool.as_deref().unwrap_or("Tool");
+            format!("{} needs permission", tool)
+        }
+        SessionState::Compacting => "compacting context...".to_string(),
+        SessionState::Running => get_stable_placeholder(&session.session_id).to_string(),
+    }
+}
+
+/// Render placeholder text with AudioLines icon (italic per design spec)
+fn render_placeholder(text: &str) -> Div {
+    div()
+        .w_full() // Fill parent container width
+        .h(px(18.0)) // Fixed height for consistent layout
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(6.0))
+        .overflow_hidden()
+        .min_w_0()
+        // AudioLines icon
         .child(
             div()
                 .flex_shrink_0()
-                .w(px(SESSION_NAME_WIDTH))
-                .h_full()
-                .overflow_hidden()
+                .w(px(TOOL_ICON_WIDTH))
+                .h(px(TOOL_ICON_WIDTH))
+                .flex()
+                .items_center()
+                .justify_center()
                 .child(
-                    div()
-                        .h_full()
-                        .flex()
-                        .items_center()
-                        .ml(px(marquee_offset))
-                        .font_family("Maple Mono NF CN")
-                        .text_size(px(14.0))
-                        .text_color(gpui::rgb(0x1a1a1a)) // Dark text for glass background
-                        .whitespace_nowrap()
-                        .child(if needs_marquee && is_scrolling {
-                            // Two copies for seamless loop when scrolling
-                            format!("{}    {}", session_name, session_name)
-                        } else {
-                            session_name.to_string()
-                        }),
+                    svg()
+                        .path("icons/audio-lines.svg")
+                        .size(px(TOOL_ICON_WIDTH))
+                        .text_color(colors::ICON_TOOL),
                 ),
         )
-        // Current tool (flex-1, takes remaining space)
-        .child(render_current_tool(running_tools, tool_index, fade_progress))
+        // Placeholder text
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .font_family("Maple Mono NF CN")
+                .text_size(px(12.0))
+                .italic()
+                .text_color(colors::TEXT_SECONDARY)
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(text.to_string()),
+        )
+}
+
+/// Render tool or state-specific placeholder
+/// Shows tools if available, otherwise shows state-specific placeholder text
+fn render_tool_or_placeholder(
+    session: &SessionInfo,
+    tool_index: usize,
+    fade_progress: f32,
+) -> Div {
+    if session.running_tools.is_empty() {
+        // Show state-specific placeholder
+        let placeholder_text = get_placeholder_text(session);
+        return div()
+            .flex_1()
+            .min_w_0() // Allow shrinking for text ellipsis
+            .h(px(18.0)) // Fixed height to match tool display
+            .overflow_hidden()
+            .child(render_placeholder(&placeholder_text));
+    }
+
+    // Render tools with cross-fade animation
+    render_current_tool(&session.running_tools, tool_index, fade_progress)
 }
 
 /// Render current tool with cross-fade animation
 /// Shows one tool at a time, cycling through the list
-pub fn render_current_tool(
-    tools: &[RunningTool],
-    tool_index: usize,
-    fade_progress: f32,
-) -> Div {
-    if tools.is_empty() {
-        return div().flex_shrink_0().w(px(TOOL_COLUMN_WIDTH));
-    }
-
+fn render_current_tool(tools: &[RunningTool], tool_index: usize, fade_progress: f32) -> Div {
     // Get current and next tool indices
     let current_idx = tool_index % tools.len();
     let next_idx = (tool_index + 1) % tools.len();
@@ -107,26 +258,28 @@ pub fn render_current_tool(
     let next_opacity = progress; // fades in
 
     // Slide animation offsets
-    let slide_distance = ROW_HEIGHT * 0.6;
+    let slide_distance = 12.0;
     let current_y_offset = -progress * slide_distance; // slides up
     let next_y_offset = (1.0 - progress) * slide_distance; // slides down from above
 
     // Stack both tools with cross-fade opacity using a relative container
     div()
-        .flex_shrink_0()
-        .w(px(TOOL_COLUMN_WIDTH))
-        .h_full()
+        .flex_1()
+        .min_w_0() // Allow shrinking for text ellipsis
+        .h(px(18.0))
         .relative()
         .overflow_hidden()
-        .text_size(px(12.0))
         // Current tool (fading out, sliding up)
         .child(
             div()
                 .absolute()
-                .inset_0()
+                .left_0()
+                .right_0()
+                .h(px(18.0))
                 .top(px(current_y_offset))
                 .flex()
                 .items_center()
+                .overflow_hidden()
                 .opacity(current_opacity)
                 .child(render_tool_with_icon(current_tool)),
         )
@@ -134,79 +287,75 @@ pub fn render_current_tool(
         .child(
             div()
                 .absolute()
-                .inset_0()
+                .left_0()
+                .right_0()
+                .h(px(18.0))
                 .top(px(next_y_offset))
                 .flex()
                 .items_center()
+                .overflow_hidden()
                 .opacity(next_opacity)
                 .child(render_tool_with_icon(next_tool)),
         )
 }
 
-/// Icon width for consistent alignment (Nerd Font icons vary in width)
-const TOOL_ICON_WIDTH: f32 = 16.0;
-/// Max characters for tool label display (28 chars for wider column)
-const TOOL_LABEL_MAX_CHARS: usize = 28;
+/// Icon width for consistent alignment
+const TOOL_ICON_WIDTH: f32 = 12.0;
 
-/// Truncate string intelligently based on content type
-/// - Paths: truncate prefix ("...filename.rs")
-/// - Commands/text: truncate suffix ("cargo bui...")
-fn truncate_label(s: &str, max_chars: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count <= max_chars {
-        return s.to_string();
-    }
-
-    // Path detection: contains path separator
-    let is_path = s.contains('/') || s.contains('\\');
-
-    if is_path {
-        // For paths: truncate prefix, keep filename/end portion
-        let chars: Vec<char> = s.chars().collect();
-        let keep_chars = max_chars.saturating_sub(3); // Reserve 3 for "..."
-        let start = char_count - keep_chars;
-        format!("...{}", chars[start..].iter().collect::<String>())
-    } else {
-        // For commands/text: truncate suffix
-        format!(
-            "{}...",
-            s.chars()
-                .take(max_chars.saturating_sub(3))
-                .collect::<String>()
-        )
-    }
-}
-
-/// Dimmed color for tool display
-const TOOL_COLOR: u32 = 0x303030FF; // Dark gray
-
-/// Render a tool with its Nerd Font icon
+/// Render a tool with its SVG icon (using liquid glass theme colors)
 pub fn render_tool_with_icon(tool: &RunningTool) -> Div {
-    let icon = icons::tool_nerd_icon(&tool.tool_name);
-    let display_text = tool.tool_label.as_deref().unwrap_or(&tool.tool_name);
-    let truncated = truncate_label(display_text, TOOL_LABEL_MAX_CHARS);
+    let icon_path = icons::tool_icon_asset(&tool.tool_name);
+    let display_text = if tool.tool_name.starts_with("mcp__") {
+        // Extract server name from mcp__server__function format
+        let parts: Vec<&str> = tool.tool_name.split("__").collect();
+        if parts.len() >= 3 {
+            let server = parts[1];
+            let func = tool.tool_label.as_deref().unwrap_or(parts[2]);
+            format!("{}: {}", server, func)
+        } else {
+            tool.tool_label.clone().unwrap_or_else(|| tool.tool_name.clone())
+        }
+    } else {
+        tool.tool_label.as_deref().unwrap_or(&tool.tool_name).to_string()
+    };
 
     div()
+        .w_full() // Fill parent container width
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(1.0))
-        .max_w(px(TOOL_COLUMN_WIDTH))
+        .gap(px(6.0)) // Per design spec: event gap = 6px
         .overflow_hidden()
-        .font_family("Maple Mono NF CN")
-        .text_color(gpui::rgba(TOOL_COLOR))
+        .min_w_0()
+        // Tool icon (SVG)
         .child(
             div()
                 .flex_shrink_0()
                 .w(px(TOOL_ICON_WIDTH))
-                .text_size(px(12.0))
-                .child(icon),
+                .h(px(TOOL_ICON_WIDTH))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    svg()
+                        .path(icon_path)
+                        .size(px(TOOL_ICON_WIDTH))
+                        .text_color(colors::ICON_TOOL),
+                ),
         )
+        // Tool label (italic per design spec, with ellipsis)
         .child(
             div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .font_family("Maple Mono NF CN")
                 .text_size(px(12.0))
+                .italic()
+                .text_color(colors::TEXT_SECONDARY)
                 .whitespace_nowrap()
-                .child(truncated),
+                .text_ellipsis()
+                .child(display_text),
         )
 }
 
@@ -220,28 +369,31 @@ pub fn extract_session_name(cwd: &str) -> String {
 }
 
 /// Convert SessionState to color (used by indicator.rs)
+#[allow(dead_code)]
 pub fn state_to_color(state: SessionState) -> gpui::Hsla {
     match state {
-        SessionState::Running => icons::colors::GREEN,
-        SessionState::Idle => icons::colors::BLUE,
-        SessionState::Attention => icons::colors::YELLOW,
-        SessionState::Compacting => icons::colors::PURPLE,
-        SessionState::Stale => icons::colors::GRAY,
+        SessionState::Running => colors::GREEN,
+        SessionState::Idle => colors::BLUE,
+        SessionState::Attention => colors::YELLOW,
+        SessionState::Compacting => colors::PURPLE,
+        SessionState::Stale => colors::GRAY,
     }
 }
 
-/// Render state indicator with Nerd Font icon and opacity
+/// Render state indicator with SVG icon and opacity
 ///
-/// Uses monochrome color with varying opacity based on state urgency:
-/// - Running/Attention: 100% (active, needs attention)
-/// - Compacting: 70% (background work)
-/// - Idle: 50% (taking a break)
-/// - Stale: 30% (abandoned)
-///
-/// Attention state has a shake animation.
-fn render_state_indicator(state: SessionState, animation_start: Instant) -> Div {
-    let icon = state_to_icon(state);
-    let opacity = state_to_opacity(state);
+/// Uses white icon color with varying opacity based on state urgency.
+/// On hover, swaps to remove (X) icon with slide animation.
+fn render_state_indicator(
+    state: SessionState,
+    animation_start: Instant,
+    state_opacity: f32,
+    state_x: f32,
+    remove_opacity: f32,
+    remove_x: f32,
+) -> Div {
+    let icon_path = icons::state_icon_path(state);
+    let base_opacity = state_to_opacity(state);
 
     // Calculate shake offset for Attention state
     let shake_offset = if state == SessionState::Attention {
@@ -250,61 +402,84 @@ fn render_state_indicator(state: SessionState, animation_start: Instant) -> Div 
         0.0
     };
 
-    // Medium gray (#6B7280) with state-based opacity
-    let icon_color = gpui::Hsla {
-        h: 220.0 / 360.0,
-        s: 0.09,
-        l: 0.46,
-        a: opacity,
+    // White icon with state-based opacity (dark glass theme)
+    let state_icon_color = gpui::Hsla {
+        h: 0.0,
+        s: 0.0,
+        l: 1.0,
+        a: base_opacity * state_opacity,
+    };
+
+    let remove_icon_color = gpui::Hsla {
+        h: 0.0,
+        s: 0.0,
+        l: 1.0,
+        a: 0.9 * remove_opacity,
     };
 
     div()
         .flex_shrink_0()
-        .w(px(STATUS_DOT_WIDTH))
-        .h(px(STATUS_DOT_WIDTH))
-        .flex()
-        .items_center()
-        .justify_center()
+        .w(px(STATE_ICON_SIZE))
+        .h(px(STATE_ICON_SIZE))
+        .relative()
+        .overflow_hidden()
+        // State icon (slides right, fades out on hover)
         .child(
             div()
-                .ml(px(shake_offset)) // Apply horizontal shake for attention
-                .font_family("Maple Mono NF CN")
-                .text_size(px(12.0))
-                .text_color(icon_color)
-                .child(icon),
+                .absolute()
+                .top_0()
+                .left_0()
+                .w(px(STATE_ICON_SIZE))
+                .h(px(STATE_ICON_SIZE))
+                .flex()
+                .items_center()
+                .justify_center()
+                .ml(px(shake_offset + state_x))
+                .opacity(state_opacity)
+                .child(
+                    svg()
+                        .path(icon_path)
+                        .size(px(STATE_ICON_SIZE))
+                        .text_color(state_icon_color),
+                ),
+        )
+        // Remove icon (slides in from left, fades in on hover)
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .w(px(STATE_ICON_SIZE))
+                .h(px(STATE_ICON_SIZE))
+                .flex()
+                .items_center()
+                .justify_center()
+                .ml(px(remove_x))
+                .opacity(remove_opacity)
+                .child(
+                    svg()
+                        .path("icons/bomb.svg")
+                        .size(px(STATE_ICON_SIZE))
+                        .text_color(remove_icon_color),
+                ),
         )
 }
 
-/// Get Nerd Font icon for session state
-fn state_to_icon(state: SessionState) -> &'static str {
-    match state {
-        SessionState::Running => state_icons::RUNNING,
-        SessionState::Attention => state_icons::ATTENTION,
-        SessionState::Compacting => state_icons::COMPACTING,
-        SessionState::Idle => state_icons::IDLE,
-        SessionState::Stale => state_icons::STALE,
-    }
-}
-
-/// Get opacity for session state (urgency hierarchy)
+/// Get opacity for session state (from prototype)
 fn state_to_opacity(state: SessionState) -> f32 {
     match state {
         SessionState::Running | SessionState::Attention => 1.0,
-        SessionState::Compacting => 0.7,
-        SessionState::Idle => 0.5,
-        SessionState::Stale => 0.3,
+        SessionState::Compacting => 0.9,
+        SessionState::Idle | SessionState::Stale => 0.8,
     }
 }
 
-/// Calculate marquee offset during reset animation
-pub fn calculate_reset_offset(from_offset: f32, elapsed_ms: u128) -> f32 {
-    let progress = (elapsed_ms as f32 / RESET_DURATION_MS as f32).min(1.0);
-    let eased = ease_out(progress);
-    from_offset * (1.0 - eased)
-}
+/// Header bar height (28px per prototype)
+pub const HEADER_HEIGHT: f32 = 28.0;
 
 /// Calculate expanded window height based on session count
 pub fn calculate_expanded_height(session_count: usize) -> f32 {
     let count = session_count.min(MAX_SESSIONS);
-    (ROW_HEIGHT + ROW_GAP) * count as f32 + 12.0
+    // Header (28px) + rows + container padding (10px top + 10px bottom)
+    HEADER_HEIGHT + (ROW_HEIGHT + ROW_GAP) * count as f32 + 20.0
 }

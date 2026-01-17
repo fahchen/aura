@@ -2,8 +2,19 @@
 
 use aura_common::{AgentEvent, AgentType, RunningTool, SessionInfo, SessionState};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tracing::{debug, info, trace};
+
+/// Convert an Instant to a Unix timestamp (seconds since epoch)
+fn instant_to_unix_timestamp(instant: Instant) -> u64 {
+    // Use saturating_duration_since to avoid panic if instant is in the future
+    let elapsed = Instant::now().saturating_duration_since(instant);
+    let system_time = SystemTime::now() - elapsed;
+    system_time
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
 
 /// Minimum duration to keep completed tools visible
 const MIN_TOOL_DISPLAY: Duration = Duration::from_secs(1);
@@ -31,6 +42,12 @@ pub struct Session {
     pub last_activity: Instant,
     /// Custom session name (if set by user via `aura set-name`)
     pub name: Option<String>,
+    /// When the session became idle
+    pub stopped_at: Option<Instant>,
+    /// When the session became stale
+    pub stale_at: Option<Instant>,
+    /// Tool requesting permission (from NeedsAttention message)
+    pub permission_tool: Option<String>,
 }
 
 impl Session {
@@ -44,7 +61,17 @@ impl Session {
             recent_tools: Vec::new(),
             last_activity: Instant::now(),
             name: None,
+            stopped_at: None,
+            stale_at: None,
+            permission_tool: None,
         }
+    }
+
+    /// Clear timestamp fields when transitioning to Running state
+    fn clear_timestamps(&mut self) {
+        self.stopped_at = None;
+        self.stale_at = None;
+        self.permission_tool = None;
     }
 
     fn touch(&mut self) {
@@ -77,6 +104,9 @@ impl Session {
             state: self.state,
             running_tools: self.visible_tools(),
             name: self.name.clone(),
+            stopped_at: self.stopped_at.map(instant_to_unix_timestamp),
+            stale_at: self.stale_at.map(instant_to_unix_timestamp),
+            permission_tool: self.permission_tool.clone(),
         }
     }
 }
@@ -123,6 +153,7 @@ impl SessionRegistry {
                 self.update_session(&session_id, &cwd, |session| {
                     if session.state == SessionState::Idle || session.state == SessionState::Stale {
                         session.state = SessionState::Running;
+                        session.clear_timestamps();
                     }
                 });
             }
@@ -137,6 +168,7 @@ impl SessionRegistry {
                 debug!(%session_id, %tool_name, "tool started");
                 self.update_session(&session_id, &cwd, |session| {
                     session.state = SessionState::Running;
+                    session.clear_timestamps();
                     session
                         .running_tools
                         .push(RunningTool { tool_id, tool_name, tool_label });
@@ -164,11 +196,14 @@ impl SessionRegistry {
             }
 
             AgentEvent::NeedsAttention {
-                session_id, cwd, ..
+                session_id,
+                cwd,
+                message,
             } => {
                 info!(%session_id, "needs attention");
                 self.update_session(&session_id, &cwd, |session| {
                     session.state = SessionState::Attention;
+                    session.permission_tool = message;
                 });
             }
 
@@ -184,6 +219,8 @@ impl SessionRegistry {
                 self.update_session(&session_id, &cwd, |session| {
                     session.state = SessionState::Idle;
                     session.running_tools.clear();
+                    session.stopped_at = Some(Instant::now());
+                    session.permission_tool = None;
                 });
             }
 
@@ -211,8 +248,9 @@ impl SessionRegistry {
 
             if now.duration_since(session.last_activity) > timeout {
                 // Only mark stale if not already in a terminal state
-                if session.state != SessionState::Idle {
+                if session.state != SessionState::Idle && session.state != SessionState::Stale {
                     session.state = SessionState::Stale;
+                    session.stale_at = Some(Instant::now());
                 }
             }
         }
@@ -221,6 +259,12 @@ impl SessionRegistry {
     /// Get all sessions as SessionInfo
     pub fn get_all(&self) -> Vec<SessionInfo> {
         self.sessions.values().map(|s| s.to_info()).collect()
+    }
+
+    /// Remove a session by ID (used by UI when clicking the remove button)
+    pub fn remove_session(&mut self, session_id: &str) {
+        info!(%session_id, "session removed via UI");
+        self.sessions.remove(session_id);
     }
 
     /// Get session count
@@ -457,5 +501,121 @@ mod tests {
 
         let session = registry.sessions.get("s1").unwrap();
         assert_eq!(session.recent_tools.len(), 0);
+    }
+
+    #[test]
+    fn stopped_at_timestamp_set_on_idle() {
+        let mut registry = SessionRegistry::new();
+
+        registry.process_event(AgentEvent::SessionStarted {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            agent: AgentType::ClaudeCode,
+        });
+
+        // Initially no stopped_at
+        let session = registry.sessions.get("s1").unwrap();
+        assert!(session.stopped_at.is_none());
+
+        // Go idle
+        registry.process_event(AgentEvent::Idle {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+        });
+
+        let session = registry.sessions.get("s1").unwrap();
+        assert!(session.stopped_at.is_some());
+
+        // Verify to_info() converts to Unix timestamp
+        let info = session.to_info();
+        assert!(info.stopped_at.is_some());
+        assert!(info.stopped_at.unwrap() > 0);
+    }
+
+    #[test]
+    fn permission_tool_set_on_needs_attention() {
+        let mut registry = SessionRegistry::new();
+
+        registry.process_event(AgentEvent::SessionStarted {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            agent: AgentType::ClaudeCode,
+        });
+
+        registry.process_event(AgentEvent::NeedsAttention {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            message: Some("Bash".into()),
+        });
+
+        let session = registry.sessions.get("s1").unwrap();
+        assert_eq!(session.permission_tool, Some("Bash".into()));
+
+        let info = session.to_info();
+        assert_eq!(info.permission_tool, Some("Bash".into()));
+    }
+
+    #[test]
+    fn timestamps_cleared_on_running() {
+        let mut registry = SessionRegistry::new();
+
+        registry.process_event(AgentEvent::SessionStarted {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            agent: AgentType::ClaudeCode,
+        });
+
+        // Go idle to set stopped_at
+        registry.process_event(AgentEvent::Idle {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+        });
+
+        let session = registry.sessions.get("s1").unwrap();
+        assert!(session.stopped_at.is_some());
+
+        // Activity should clear timestamps
+        registry.process_event(AgentEvent::Activity {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+        });
+
+        let session = registry.sessions.get("s1").unwrap();
+        assert!(session.stopped_at.is_none());
+        assert!(session.stale_at.is_none());
+        assert!(session.permission_tool.is_none());
+    }
+
+    #[test]
+    fn stale_at_timestamp_set_on_mark_stale() {
+        let mut registry = SessionRegistry::new();
+
+        registry.process_event(AgentEvent::SessionStarted {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            agent: AgentType::ClaudeCode,
+        });
+
+        // Manually set last_activity to the past
+        {
+            let session = registry.sessions.get_mut("s1").unwrap();
+            session.last_activity = Instant::now() - Duration::from_secs(120);
+        }
+
+        // Initially no stale_at
+        let session = registry.sessions.get("s1").unwrap();
+        assert!(session.stale_at.is_none());
+
+        // mark_stale with short timeout
+        registry.mark_stale(Duration::from_secs(60));
+
+        let session = registry.sessions.get("s1").unwrap();
+        assert_eq!(session.state, SessionState::Stale);
+        assert!(session.stale_at.is_some());
+
+        // Verify to_info() converts to Unix timestamp
+        let info = session.to_info();
+        assert!(info.stale_at.is_some());
+        assert!(info.stale_at.unwrap() > 0);
     }
 }

@@ -2,6 +2,18 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Placeholder texts displayed when agent is thinking/processing
+pub const PLACEHOLDER_TEXTS: &[&str] = &[
+    "thinking...",
+    "drafting...",
+    "building...",
+    "planning...",
+    "analyzing...",
+    "pondering...",
+    "processing...",
+    "reasoning...",
+];
+
 /// Session state in the HUD
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]

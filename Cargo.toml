@@ -27,7 +27,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
 
 # UI
-gpui = "0.2"
+gpui = { path = "/Users/fahchen/GitHub/zed/crates/gpui", features = ["test-support"] }
 
 # Internal crates
 aura-common = { path = "crates/aura-common" }

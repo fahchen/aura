@@ -7,9 +7,6 @@ pub const CYCLE_DURATION_MIN_MS: u64 = 1500; // Min time showing each tool
 pub const CYCLE_DURATION_MAX_MS: u64 = 2000; // Max time showing each tool
 pub const FADE_DURATION_MS: u64 = 500; // Cross-fade duration
 
-/// Marquee animation constants
-pub const MARQUEE_SPEED_PX_PER_SEC: f32 = 30.0; // Pixels per second scroll speed
-pub const MARQUEE_PAUSE_MS: u64 = 1000; // Pause at each end before reversing
 
 /// Simple hash function for deterministic pseudo-random per cycle
 pub fn cycle_hash(cycle: u64, seed: u64) -> u64 {
@@ -78,9 +75,6 @@ pub fn ease_out(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(2)
 }
 
-/// Reset animation duration in milliseconds
-pub const RESET_DURATION_MS: u64 = 300;
-
 /// Shake animation constants
 const SHAKE_PERIOD_MS: f32 = 150.0; // Oscillation period in milliseconds
 const SHAKE_AMPLITUDE: f32 = 1.5; // Maximum horizontal displacement in pixels
@@ -93,39 +87,104 @@ pub fn calculate_shake_offset(start_time: Instant) -> f32 {
     phase.sin() * SHAKE_AMPLITUDE
 }
 
-/// Monaco 13px monospace font: base unit width
-pub const MARQUEE_CHAR_WIDTH: f32 = 7.8;
-/// Separator: 4 spaces
-pub const MARQUEE_SEPARATOR_CHARS: usize = 4;
-/// Separator width for seamless marquee
-pub const MARQUEE_SEPARATOR_WIDTH: f32 = MARQUEE_SEPARATOR_CHARS as f32 * MARQUEE_CHAR_WIDTH;
+/// Breathe animation constants
+const BREATHE_CYCLE_MS: f32 = 4000.0; // Full cycle duration in milliseconds
+const BREATHE_MIN_OPACITY: f32 = 0.3; // Minimum opacity
+const BREATHE_MAX_OPACITY: f32 = 0.5; // Maximum opacity
 
-/// Calculate marquee scroll offset for text that overflows its container.
-/// Returns the x-offset in pixels (negative = scrolled left).
-///
-/// For seamless scrolling, the text is rendered twice with a separator.
-/// We scroll by exactly (text_width + separator_width) to create a perfect loop.
-///
-/// Arguments:
-/// - `text_width`: The width of ONE copy of the text
-/// - `container_width`: The visible container width
-/// - `start_time`: When the animation started
-pub fn calculate_marquee_offset(text_width: f32, container_width: f32, start_time: Instant) -> f32 {
-    let overflow = text_width - container_width;
-    if overflow <= 0.0 {
-        return 0.0; // No scrolling needed
+/// Calculate breathe animation opacity for stale sessions.
+/// Cycles between 0.3 and 0.5 over 4 seconds using sine wave.
+pub fn calculate_breathe_opacity(start_time: Instant) -> f32 {
+    let elapsed_ms = start_time.elapsed().as_millis() as f32;
+    let t = (elapsed_ms % BREATHE_CYCLE_MS) / BREATHE_CYCLE_MS;
+    let sine = (t * std::f32::consts::TAU).sin();
+    // Map sine [-1, 1] to [0.3, 0.5]: center = 0.4, amplitude = 0.1
+    let center = (BREATHE_MIN_OPACITY + BREATHE_MAX_OPACITY) / 2.0;
+    let amplitude = (BREATHE_MAX_OPACITY - BREATHE_MIN_OPACITY) / 2.0;
+    center + amplitude * sine
+}
+
+
+/// Row slide-in animation duration in milliseconds
+pub const ROW_SLIDE_IN_MS: u64 = 350;
+
+/// Calculate row slide-in animation state.
+/// Returns (opacity, x_offset) for the slide-in animation.
+/// - opacity: 0.0 → 1.0
+/// - x_offset: -12.0 → 0.0
+pub fn calculate_row_slide_in(appeared_at: Instant) -> (f32, f32) {
+    let elapsed_ms = appeared_at.elapsed().as_millis() as u64;
+
+    if elapsed_ms >= ROW_SLIDE_IN_MS {
+        return (1.0, 0.0); // Animation complete
     }
 
-    let elapsed_ms = start_time.elapsed().as_millis() as u64;
+    let progress = elapsed_ms as f32 / ROW_SLIDE_IN_MS as f32;
+    let eased = ease_out(progress);
 
-    // Scroll distance = one copy + separator (seamless loop point)
-    let scroll_distance = text_width + MARQUEE_SEPARATOR_WIDTH;
-    let scroll_duration_ms = ((scroll_distance / MARQUEE_SPEED_PX_PER_SEC) * 1000.0) as u64;
+    let opacity = eased;
+    let x_offset = -12.0 * (1.0 - eased);
 
-    // Continuous scroll - no pause
-    let pos_in_cycle = elapsed_ms % scroll_duration_ms;
-    let scroll_progress = pos_in_cycle as f32 / scroll_duration_ms as f32;
-    -scroll_progress * scroll_distance
+    (opacity, x_offset)
+}
+
+/// Row slide-out animation duration in milliseconds
+pub const ROW_SLIDE_OUT_MS: u64 = 300;
+
+/// Calculate row slide-out animation state (when session is removed).
+/// Returns (opacity, x_offset) for the slide-out animation.
+/// - opacity: 1.0 → 0.0
+/// - x_offset: 0.0 → 12.0 (slides right)
+pub fn calculate_row_slide_out(removed_at: Instant) -> (f32, f32, bool) {
+    let elapsed_ms = removed_at.elapsed().as_millis() as u64;
+
+    if elapsed_ms >= ROW_SLIDE_OUT_MS {
+        return (0.0, 12.0, true); // Animation complete, should be removed
+    }
+
+    let progress = elapsed_ms as f32 / ROW_SLIDE_OUT_MS as f32;
+    // Use accelerate-out easing (approximation of cubic-bezier(0.4, 0, 1, 1))
+    let eased = progress * progress;
+
+    let opacity = 1.0 - eased;
+    let x_offset = 12.0 * eased;
+
+    (opacity, x_offset, false)
+}
+
+/// Icon swap animation duration in milliseconds
+pub const ICON_SWAP_MS: u64 = 300;
+
+/// Calculate icon swap animation state.
+/// Returns (state_opacity, state_x, remove_opacity, remove_x) for the swap animation.
+/// - state_icon: opacity 1→0, x 0→16
+/// - remove_icon: opacity 0→1, x -16→0
+pub fn calculate_icon_swap(hover_started: Option<Instant>, is_hovered: bool) -> (f32, f32, f32, f32) {
+    let (progress, reverse) = match (hover_started, is_hovered) {
+        (Some(start), true) => {
+            // Hovering - animate state icon out, remove icon in
+            let elapsed = start.elapsed().as_millis() as u64;
+            let p = (elapsed as f32 / ICON_SWAP_MS as f32).min(1.0);
+            (ease_out(p), false)
+        }
+        (Some(start), false) => {
+            // Not hovering but have a start time - animating back
+            let elapsed = start.elapsed().as_millis() as u64;
+            let p = (elapsed as f32 / ICON_SWAP_MS as f32).min(1.0);
+            (ease_out(p), true)
+        }
+        (None, _) => (0.0, false),
+    };
+
+    let (state_opacity, state_x, remove_opacity, remove_x) = if reverse {
+        // Reverse animation (unhover): state fades in, remove fades out
+        (progress, 16.0 * (1.0 - progress), 1.0 - progress, -16.0 * progress)
+    } else {
+        // Forward animation (hover): state fades out, remove fades in
+        (1.0 - progress, 16.0 * progress, progress, -16.0 * (1.0 - progress))
+    };
+
+    (state_opacity, state_x, remove_opacity, remove_x)
 }
 
 #[cfg(test)]
@@ -177,6 +236,27 @@ mod tests {
         assert!(
             offset.abs() <= SHAKE_AMPLITUDE + 0.1,
             "Offset should be within amplitude bounds"
+        );
+    }
+
+    #[test]
+    fn test_breathe_opacity_bounds() {
+        let start = Instant::now();
+        // At t=0, opacity should be at center (sin(0) = 0 -> 0.4)
+        let opacity = calculate_breathe_opacity(start);
+        assert!(
+            (opacity - 0.4).abs() < 0.05,
+            "Initial opacity should be near center (0.4), got {}",
+            opacity
+        );
+
+        // After some time, opacity should always be within bounds [0.3, 0.5]
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let opacity = calculate_breathe_opacity(start);
+        assert!(
+            opacity >= BREATHE_MIN_OPACITY - 0.01 && opacity <= BREATHE_MAX_OPACITY + 0.01,
+            "Opacity should be in range [0.3, 0.5], got {}",
+            opacity
         );
     }
 }
