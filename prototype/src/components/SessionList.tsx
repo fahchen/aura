@@ -9,10 +9,7 @@ interface SessionListProps {
   onDragStart?: (e: React.MouseEvent) => void;
 }
 
-const MAX_VISIBLE_SESSIONS = 5;
-
 export function SessionList({ sessions, onCollapse, listStyle, onDragStart }: SessionListProps) {
-  const visibleSessions = sessions.slice(0, MAX_VISIBLE_SESSIONS);
   const sessionCount = sessions.length;
 
   return (
@@ -35,7 +32,7 @@ export function SessionList({ sessions, onCollapse, listStyle, onDragStart }: Se
 
       {/* Sessions container */}
       <div className="session-list-content">
-        {visibleSessions.map(session => (
+        {sessions.map(session => (
           <SessionRow key={session.sessionId} session={session} />
         ))}
       </div>

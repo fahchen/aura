@@ -4,6 +4,7 @@ import { useDrag } from './hooks/useDrag';
 import { Indicator } from './components/Indicator';
 import { SessionList } from './components/SessionList';
 import { Controls } from './components/Controls';
+import { IconPreview } from './IconPreview';
 
 // Initial setup events
 const SETUP_EVENTS = [
@@ -45,6 +46,7 @@ export default function App() {
   const [bgImage, setBgImage] = useState<string | null>(null);
   const [simulationRunning, setSimulationRunning] = useState(false);
   const [listStyle, setListStyle] = useState<'card' | 'full-width'>('card');
+  const [showIconPreview, setShowIconPreview] = useState(false);
   const simulationStep = useRef(0);
   const prevSessionCount = useRef(0);
   const { position, isDragging, handleMouseDown } = useDrag();
@@ -146,6 +148,30 @@ export default function App() {
     cursor: isDragging ? 'grabbing' : undefined,
   };
 
+  if (showIconPreview) {
+    return (
+      <>
+        <IconPreview />
+        <button
+          onClick={() => setShowIconPreview(false)}
+          style={{
+            position: 'fixed',
+            top: 20,
+            right: 20,
+            padding: '8px 16px',
+            background: '#a78bfa',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 8,
+            cursor: 'pointer',
+          }}
+        >
+          Back to Prototype
+        </button>
+      </>
+    );
+  }
+
   return (
     <>
       <div className="prototype-container" style={containerStyle}>
@@ -159,6 +185,23 @@ export default function App() {
           />
         )}
       </div>
+
+      <button
+        onClick={() => setShowIconPreview(true)}
+        style={{
+          position: 'fixed',
+          top: 20,
+          right: 20,
+          padding: '8px 16px',
+          background: 'rgba(255,255,255,0.1)',
+          color: '#fff',
+          border: '1px solid rgba(255,255,255,0.2)',
+          borderRadius: 8,
+          cursor: 'pointer',
+        }}
+      >
+        Icon Preview
+      </button>
 
       <Controls
         onToggleView={handleToggleView}

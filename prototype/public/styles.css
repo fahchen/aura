@@ -109,16 +109,38 @@ body.bg-dark {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: opacity 0.3s ease-in-out;
 }
 
-.indicator-icon.fading {
-  opacity: 0;
+/* Slide exit: current icon slides out to the left */
+.indicator-icon.slide-exit {
+  animation: slideOutToLeft 0.4s ease-out forwards;
 }
 
-@keyframes fadeInOut {
-  0%, 100% { opacity: 1; }
-  45%, 55% { opacity: 0; }
+@keyframes slideOutToLeft {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+}
+
+/* Slide enter: new icon slides in from the right */
+.indicator-icon.slide-enter {
+  animation: slideInFromRight 0.4s ease-out forwards;
+}
+
+@keyframes slideInFromRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
 /* Indicator states - attention (neutral glass with pulse) */
@@ -302,6 +324,10 @@ body.bg-dark {
   flex-direction: column;
   gap: 4px;
   padding: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
   background: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0.08) 0%,
@@ -316,6 +342,10 @@ body.bg-dark {
     0 4px 12px rgba(0, 0, 0, 0.15),
     0 8px 32px rgba(0, 0, 0, 0.2),
     0 16px 48px rgba(0, 0, 0, 0.15);
+}
+
+.session-list-content::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
 }
 
 .session-list-close {

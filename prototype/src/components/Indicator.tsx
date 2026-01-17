@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import type { Session, SessionState } from '../types';
+import type { Session } from '../types';
 import { INDICATOR_ICONS, CREATIVE_ICONS } from '../constants';
 
 interface IndicatorProps {
@@ -9,36 +9,44 @@ interface IndicatorProps {
   onDragStart?: (e: React.MouseEvent) => void;
 }
 
-type AggregateState = SessionState | 'no-sessions';
+type IndicatorState = 'idle' | 'attention' | 'running';
 
-function getAggregateState(sessions: Session[]): AggregateState {
+function getIndicatorState(sessions: Session[]): IndicatorState {
   if (sessions.length === 0) {
-    return 'no-sessions';
+    return 'idle';
   }
 
-  // Priority: attention > running > compacting > idle > stale
   const states = sessions.map(s => s.state);
+  if (states.includes('attention')) {
+    return 'attention';
+  }
 
-  if (states.includes('attention')) return 'attention';
-  if (states.includes('running')) return 'running';
-  if (states.includes('compacting')) return 'compacting';
-  if (states.includes('idle')) return 'idle';
-  if (states.includes('stale')) return 'stale';
+  return 'running';
+}
 
-  return 'no-sessions';
+// Get a random index different from the current one
+function getRandomIndex(currentIndex: number): number {
+  const len = CREATIVE_ICONS.length;
+  if (len <= 1) return 0;
+  let nextIndex: number;
+  do {
+    nextIndex = Math.floor(Math.random() * len);
+  } while (nextIndex === currentIndex);
+  return nextIndex;
 }
 
 const CYCLE_INTERVAL_MS = 2500;
-const FADE_DURATION_MS = 300;
+const SLIDE_DURATION_MS = 400;
 
 export function Indicator({ sessions, onClick, onDragStart }: IndicatorProps) {
-  const aggregateState = getAggregateState(sessions);
-  const [iconIndex, setIconIndex] = useState(0);
-  const [isFading, setIsFading] = useState(false);
-  const pendingIndex = useRef<number | null>(null);
+  const indicatorState = getIndicatorState(sessions);
+  const [currentIndex, setCurrentIndex] = useState(() => Math.floor(Math.random() * CREATIVE_ICONS.length));
+  const [nextIndex, setNextIndex] = useState<number | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const transitionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Cycle through creative icons only when running or stale
-  const shouldCycle = sessions.length > 0 && (aggregateState === 'running' || aggregateState === 'stale');
+  // Cycle through creative icons only in 'running' state
+  const shouldCycle = indicatorState === 'running';
 
   useEffect(() => {
     if (!shouldCycle) {
@@ -46,30 +54,51 @@ export function Indicator({ sessions, onClick, onDragStart }: IndicatorProps) {
     }
 
     const interval = setInterval(() => {
-      // Start fade out
-      setIsFading(true);
-      pendingIndex.current = (iconIndex + 1) % CREATIVE_ICONS.length;
+      // Start transition: set next icon and trigger animation
+      const next = getRandomIndex(currentIndex);
+      setNextIndex(next);
+      setIsTransitioning(true);
 
-      // After fade out, change icon and fade in
-      setTimeout(() => {
-        setIconIndex(pendingIndex.current!);
-        setIsFading(false);
-      }, FADE_DURATION_MS);
+      // After animation completes, update current index
+      transitionTimeoutRef.current = setTimeout(() => {
+        setCurrentIndex(next);
+        setNextIndex(null);
+        setIsTransitioning(false);
+      }, SLIDE_DURATION_MS);
     }, CYCLE_INTERVAL_MS);
 
-    return () => clearInterval(interval);
-  }, [shouldCycle, iconIndex]);
+    return () => {
+      clearInterval(interval);
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current);
+      }
+    };
+  }, [shouldCycle, currentIndex]);
 
-  // Determine which icon to show
-  let Icon: LucideIcon;
-  if (shouldCycle) {
-    Icon = CREATIVE_ICONS[iconIndex];
-  } else {
-    Icon = INDICATOR_ICONS[aggregateState];
+  const indicatorClasses = ['indicator', indicatorState].join(' ');
+
+  // Static icon for idle or attention
+  if (!shouldCycle) {
+    const Icon = INDICATOR_ICONS[indicatorState];
+    return (
+      <div
+        className={indicatorClasses}
+        onClick={onClick}
+        onMouseDown={onDragStart}
+      >
+        <div className="indicator-circle">
+          <div className="indicator-gloss" />
+          <div className="indicator-icon">
+            <Icon size={16} strokeWidth={2} />
+          </div>
+        </div>
+      </div>
+    );
   }
 
-  const indicatorClasses = ['indicator', aggregateState].join(' ');
-  const iconClasses = ['indicator-icon', isFading ? 'fading' : ''].filter(Boolean).join(' ');
+  // Cycling icons with slide transition
+  const CurrentIcon = CREATIVE_ICONS[currentIndex];
+  const NextIcon = nextIndex !== null ? CREATIVE_ICONS[nextIndex] : null;
 
   return (
     <div
@@ -79,9 +108,23 @@ export function Indicator({ sessions, onClick, onDragStart }: IndicatorProps) {
     >
       <div className="indicator-circle">
         <div className="indicator-gloss" />
-        <div className={iconClasses}>
-          <Icon size={16} strokeWidth={2} />
-        </div>
+        {!isTransitioning && (
+          <div className="indicator-icon" key={`current-${currentIndex}`}>
+            <CurrentIcon size={16} strokeWidth={2} />
+          </div>
+        )}
+        {isTransitioning && (
+          <>
+            <div className="indicator-icon slide-exit" key={`exit-${currentIndex}`}>
+              <CurrentIcon size={16} strokeWidth={2} />
+            </div>
+            {NextIcon && (
+              <div className="indicator-icon slide-enter" key={`enter-${nextIndex}`}>
+                <NextIcon size={16} strokeWidth={2} />
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

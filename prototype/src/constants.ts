@@ -2,7 +2,6 @@ import type { SessionState } from './types';
 import {
   Cctv,
   Ghost,
-  RefreshCw,
   Cookie,
   BellRing,
   Bot,
@@ -16,8 +15,9 @@ import {
   Spotlight,
   BicepsFlexed,
   Rocket,
-  Star,
-  Atom,
+  Cpu,
+  Puzzle,
+  Orbit,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -38,14 +38,11 @@ export const STATE_OPACITY: Record<SessionState, number> = {
   stale: 0.8,
 };
 
-// Indicator icons include no-sessions state
-export const INDICATOR_ICONS: Record<SessionState | 'no-sessions', LucideIcon> = {
-  running: Bot,
-  idle: Panda,
-  attention: BellRing,
-  compacting: RefreshCw,
-  stale: Bot,
-  'no-sessions': Panda,
+// Indicator icons (3 states: idle, attention, running)
+export const INDICATOR_ICONS: Record<'idle' | 'attention' | 'running', LucideIcon> = {
+  idle: Panda,        // No sessions
+  attention: BellRing, // At least one attention session
+  running: Bot,        // Other (cycles through creative icons)
 };
 
 // Creative icons for cycling when sessions exist
@@ -58,8 +55,9 @@ export const CREATIVE_ICONS: LucideIcon[] = [
   Spotlight,
   BicepsFlexed,
   Rocket,
-  Star,
-  Atom,
+  Cpu,
+  Puzzle,
+  Orbit,
 ];
 
 // Tool icons mapping (still using Nerd Font for tools)
