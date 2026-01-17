@@ -8,8 +8,18 @@ interface SessionRowProps {
   onRemove?: (sessionId: string) => void;
 }
 
+function formatDateTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  return date.toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function SessionRowInner({ session, onRemove }: SessionRowProps) {
-  const { sessionId, cwd, name, state, runningTools } = session;
+  const { sessionId, cwd, name, state, runningTools, stoppedAt, staleAt } = session;
   const [toolIndex, setToolIndex] = useState(0);
   const isFirstMount = useRef(true);
   const placeholderRef = useRef(getRandomPlaceholder());
@@ -106,7 +116,13 @@ function SessionRowInner({ session, onRemove }: SessionRowProps) {
             </span>
           </div>
         ) : (
-          <span className="tool-placeholder">{placeholderRef.current}</span>
+          <span className="tool-placeholder">
+            {state === 'idle' && stoppedAt
+              ? `waiting since ${formatDateTime(stoppedAt)}`
+              : state === 'stale' && staleAt
+                ? `inactive since ${formatDateTime(staleAt)}`
+                : placeholderRef.current}
+          </span>
         )}
       </div>
     </div>

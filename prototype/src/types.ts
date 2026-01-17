@@ -12,4 +12,6 @@ export interface Session {
   name?: string;
   state: SessionState;
   runningTools: RunningTool[];
+  stoppedAt?: number;
+  staleAt?: number;
 }

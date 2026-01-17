@@ -83,7 +83,7 @@ export function useSessionManager() {
         setSessions(prev =>
           prev.map(s =>
             s.sessionId === sessionId
-              ? { ...s, state: 'idle', runningTools: [] }
+              ? { ...s, state: 'idle', runningTools: [], stoppedAt: Date.now() }
               : s
           )
         );
@@ -118,7 +118,7 @@ export function useSessionManager() {
       case 'Stale': {
         setSessions(prev =>
           prev.map(s =>
-            s.sessionId === sessionId ? { ...s, state: 'stale' } : s
+            s.sessionId === sessionId ? { ...s, state: 'stale', staleAt: Date.now() } : s
           )
         );
         break;
