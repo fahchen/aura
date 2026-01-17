@@ -37,6 +37,7 @@ export default function App() {
   const [bgClass, setBgClass] = useState('');
   const [bgImage, setBgImage] = useState<string | null>(null);
   const [simulationRunning, setSimulationRunning] = useState(false);
+  const [listStyle, setListStyle] = useState<'card' | 'full-width'>('card');
   const simulationStep = useRef(0);
 
   // Auto-expand when sessions appear, auto-collapse when empty
@@ -116,11 +117,15 @@ export default function App() {
     }
   }, []);
 
+  const handleToggleStyle = useCallback(() => {
+    setListStyle(prev => prev === 'card' ? 'full-width' : 'card');
+  }, []);
+
   return (
     <>
       <div className="prototype-container">
         {isExpanded ? (
-          <SessionList sessions={sessions} onCollapse={handleCollapse} />
+          <SessionList sessions={sessions} onCollapse={handleCollapse} listStyle={listStyle} />
         ) : (
           <Indicator sessions={sessions} onClick={handleExpand} />
         )}
@@ -132,7 +137,9 @@ export default function App() {
         onStopSimulation={handleStopSimulation}
         onAddSession={handleAddSession}
         onSetBackground={handleSetBackground}
+        onToggleStyle={handleToggleStyle}
         simulationRunning={simulationRunning}
+        listStyle={listStyle}
       />
     </>
   );

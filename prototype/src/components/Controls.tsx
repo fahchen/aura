@@ -6,7 +6,9 @@ interface ControlsProps {
   onStopSimulation: () => void;
   onAddSession: (cwd: string) => void;
   onSetBackground: (bg: string) => void;
+  onToggleStyle: () => void;
   simulationRunning: boolean;
+  listStyle: 'card' | 'full-width';
 }
 
 export function Controls({
@@ -15,7 +17,9 @@ export function Controls({
   onStopSimulation,
   onAddSession,
   onSetBackground,
+  onToggleStyle,
   simulationRunning,
+  listStyle,
 }: ControlsProps) {
   const [cwdInput, setCwdInput] = useState('/Users/dev/my-project');
 
@@ -44,6 +48,9 @@ export function Controls({
 
       <div className="control-group">
         <button onClick={onToggleView}>Toggle View</button>
+        <button onClick={onToggleStyle}>
+          Style: {listStyle === 'card' ? 'Card' : 'Full'}
+        </button>
       </div>
 
       <div className="control-group">

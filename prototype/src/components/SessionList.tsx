@@ -5,16 +5,17 @@ import { SessionRow } from './SessionRow';
 interface SessionListProps {
   sessions: Session[];
   onCollapse: () => void;
+  listStyle: 'card' | 'full-width';
 }
 
 const MAX_VISIBLE_SESSIONS = 5;
 
-export function SessionList({ sessions, onCollapse }: SessionListProps) {
+export function SessionList({ sessions, onCollapse, listStyle }: SessionListProps) {
   const visibleSessions = sessions.slice(0, MAX_VISIBLE_SESSIONS);
   const sessionCount = sessions.length;
 
   return (
-    <div className="session-list compact">
+    <div className={`session-list compact ${listStyle}`}>
       {/* Background layer */}
       <div className="session-list-header" />
 
