@@ -5,30 +5,36 @@ import { Indicator } from './components/Indicator';
 import { SessionList } from './components/SessionList';
 import { Controls } from './components/Controls';
 
-// Simulation events to demonstrate the HUD
-const SIMULATION_EVENTS = [
-  { type: 'SessionStart', sessionId: 'sess-1', cwd: '/Users/dev/project-alpha', name: '修复登录问题' },
-  { type: 'PreToolUse', sessionId: 'sess-1', toolId: 't1', toolName: 'Read', toolLabel: 'main.ts' },
-  { type: 'PostToolUse', sessionId: 'sess-1', toolId: 't1' },
-  { type: 'PreToolUse', sessionId: 'sess-1', toolId: 't2', toolName: 'Edit', toolLabel: 'config.json' },
-  { type: 'SessionStart', sessionId: 'sess-2', cwd: '/Users/dev/another-project', name: 'This is a very long session name that should truncate' },
-  { type: 'PreToolUse', sessionId: 'sess-1', toolId: 't3', toolName: 'Bash', toolLabel: 'npm test' },
-  { type: 'PermissionRequest', sessionId: 'sess-1' },
-  { type: 'PreToolUse', sessionId: 'sess-2', toolId: 't4', toolName: 'Grep', toolLabel: 'TODO' },
-  { type: 'PostToolUse', sessionId: 'sess-1', toolId: 't2' },
-  { type: 'PreToolUse', sessionId: 'sess-2', toolId: 't5', toolName: 'Write', toolLabel: 'output.txt' },
-  { type: 'PostToolUse', sessionId: 'sess-1', toolId: 't3' },
-  { type: 'SessionStart', sessionId: 'sess-3', cwd: '/Users/dev/third-project', name: '添加深色模式支持' },
-  { type: 'PreCompact', sessionId: 'sess-1' },
-  { type: 'PreToolUse', sessionId: 'sess-3', toolId: 't6', toolName: 'mcp__notion__search', toolLabel: 'docs' },
-  { type: 'PostToolUse', sessionId: 'sess-2', toolId: 't4' },
-  { type: 'PostToolUse', sessionId: 'sess-2', toolId: 't5' },
-  { type: 'Stop', sessionId: 'sess-1' },
-  { type: 'PostToolUse', sessionId: 'sess-3', toolId: 't6' },
-  { type: 'SessionEnd', sessionId: 'sess-2' },
-  { type: 'SessionEnd', sessionId: 'sess-3' },
-  { type: 'SessionEnd', sessionId: 'sess-1' },
+// Initial setup events
+const SETUP_EVENTS = [
+  // Start 5 sessions to show all states at once
+  { type: 'SessionStart', sessionId: 'sess-running', cwd: '/Users/dev/project', name: 'Running State' },
+  { type: 'SessionStart', sessionId: 'sess-idle', cwd: '/Users/dev/project', name: 'Idle State' },
+  { type: 'SessionStart', sessionId: 'sess-attention', cwd: '/Users/dev/project', name: 'Attention State' },
+  { type: 'SessionStart', sessionId: 'sess-compacting', cwd: '/Users/dev/project', name: 'Compacting State' },
+  { type: 'SessionStart', sessionId: 'sess-stale', cwd: '/Users/dev/project', name: 'Stale State' },
+
+  // Set each session to its state
+  { type: 'PreToolUse', sessionId: 'sess-running', toolId: 't1', toolName: 'Read', toolLabel: 'main.ts' },
+  { type: 'Stop', sessionId: 'sess-idle' },
+  { type: 'PermissionRequest', sessionId: 'sess-attention' },
+  { type: 'PreCompact', sessionId: 'sess-compacting' },
+  { type: 'Stale', sessionId: 'sess-stale' },
 ];
+
+// Random tool names and labels for continuous simulation
+const TOOL_NAMES = ['Read', 'Edit', 'Write', 'Bash', 'Grep', 'Glob', 'Task', 'WebFetch', 'mcp__notion__search'];
+const TOOL_LABELS = ['main.ts', 'config.json', 'index.tsx', 'npm test', 'TODO', 'src/**/*.ts', 'refactor', 'docs', 'api.ts'];
+
+function getRandomToolEvent(toolId: number): { type: string; sessionId: string; toolId: string; toolName: string; toolLabel: string } {
+  return {
+    type: 'PreToolUse',
+    sessionId: 'sess-running',
+    toolId: `t${toolId}`,
+    toolName: TOOL_NAMES[Math.floor(Math.random() * TOOL_NAMES.length)],
+    toolLabel: TOOL_LABELS[Math.floor(Math.random() * TOOL_LABELS.length)],
+  };
+}
 
 const SIMULATION_INTERVAL_MS = 800;
 
@@ -73,15 +79,22 @@ export default function App() {
     }
 
     const interval = setInterval(() => {
-      if (simulationStep.current >= SIMULATION_EVENTS.length) {
-        // Reset simulation
-        simulationStep.current = 0;
-        setSimulationRunning(false);
+      // First run through setup events
+      if (simulationStep.current < SETUP_EVENTS.length) {
+        const event = SETUP_EVENTS[simulationStep.current];
+        handleEvent(event);
+        simulationStep.current += 1;
         return;
       }
 
-      const event = SIMULATION_EVENTS[simulationStep.current];
-      handleEvent(event);
+      // Then continuously send random tool events for running session
+      const toolId = simulationStep.current;
+      // Alternate between PreToolUse and PostToolUse
+      if (toolId % 2 === 0) {
+        handleEvent(getRandomToolEvent(toolId));
+      } else {
+        handleEvent({ type: 'PostToolUse', sessionId: 'sess-running', toolId: `t${toolId - 1}` });
+      }
       simulationStep.current += 1;
     }, SIMULATION_INTERVAL_MS);
 

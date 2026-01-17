@@ -114,6 +114,15 @@ export function useSessionManager() {
         );
         break;
       }
+
+      case 'Stale': {
+        setSessions(prev =>
+          prev.map(s =>
+            s.sessionId === sessionId ? { ...s, state: 'stale' } : s
+          )
+        );
+        break;
+      }
     }
   }, []);
 

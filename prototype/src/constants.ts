@@ -1,22 +1,33 @@
 import type { SessionState } from './types';
 import {
-  Play,
-  Square,
+  Cctv,
+  Ghost,
   RefreshCw,
-  Pause,
-  Moon,
+  Cookie,
   BellRing,
   Bot,
+  Panda,
+  MessageSquareCode,
+  WandSparkles,
+  Sparkles,
+  Flame,
+  Zap,
+  Brain,
+  Spotlight,
+  BicepsFlexed,
+  Rocket,
+  Star,
+  Atom,
   type LucideIcon,
 } from 'lucide-react';
 
-// Lucide icons for session states
+// Lucide icons for session states (shown in session row)
 export const STATE_ICONS: Record<SessionState, LucideIcon> = {
-  running: Play,
-  idle: Square,
+  running: Cctv,
+  idle: MessageSquareCode,  // waiting for user input after Stop
   attention: BellRing,
-  compacting: RefreshCw,
-  stale: Pause,
+  compacting: Cookie,
+  stale: Ghost,
 };
 
 export const STATE_OPACITY: Record<SessionState, number> = {
@@ -30,12 +41,26 @@ export const STATE_OPACITY: Record<SessionState, number> = {
 // Indicator icons include no-sessions state
 export const INDICATOR_ICONS: Record<SessionState | 'no-sessions', LucideIcon> = {
   running: Bot,
-  idle: Bot,
+  idle: Panda,
   attention: BellRing,
   compacting: RefreshCw,
   stale: Bot,
-  'no-sessions': Moon,
+  'no-sessions': Panda,
 };
+
+// Creative icons for cycling when sessions exist
+export const CREATIVE_ICONS: LucideIcon[] = [
+  WandSparkles,
+  Sparkles,
+  Flame,
+  Zap,
+  Brain,
+  Spotlight,
+  BicepsFlexed,
+  Rocket,
+  Star,
+  Atom,
+];
 
 // Tool icons mapping (still using Nerd Font for tools)
 export const TOOL_ICONS: Record<string, string> = {

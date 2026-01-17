@@ -109,11 +109,16 @@ body.bg-dark {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Maple Mono NF CN', monospace;
-  font-size: 14px;
-  color: rgba(255, 255, 255, 0.85);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  z-index: 1;
+  transition: opacity 0.3s ease-in-out;
+}
+
+.indicator-icon.fading {
+  opacity: 0;
+}
+
+@keyframes fadeInOut {
+  0%, 100% { opacity: 1; }
+  45%, 55% { opacity: 0; }
 }
 
 /* Indicator states - attention (neutral glass with pulse) */
@@ -484,7 +489,7 @@ body.bg-dark {
 }
 
 .state-indicator.compacting {
-  animation: spin 2s linear infinite;
+  /* no spin for cookie */
 }
 
 @keyframes spin {
