@@ -69,11 +69,23 @@ export default function App() {
   const [bgClass, setBgClass] = useState('');
   const [bgImage, setBgImage] = useState<string | null>(null);
   const [simulationRunning, setSimulationRunning] = useState(false);
-  const [listStyle, setListStyle] = useState<'card' | 'full-width'>('card');
   const [showIconPreview, setShowIconPreview] = useState(false);
   const simulationStep = useRef(0);
   const prevSessionCount = useRef(0);
-  const { position, isDragging, handleMouseDown } = useDrag();
+  // Separate drag states for indicator and session list
+  const {
+    position: indicatorPosition,
+    isDragging: isIndicatorDragging,
+    wasDragged: indicatorWasDragged,
+    handleMouseDown: handleIndicatorMouseDown,
+    resetDragState: resetIndicatorDragState,
+  } = useDrag();
+
+  const {
+    position: listPosition,
+    isDragging: isListDragging,
+    handleMouseDown: handleListMouseDown,
+  } = useDrag({ x: 0, y: 48 }); // Initial offset below indicator (36px + 12px gap)
 
   // Auto-expand when sessions first appear, auto-collapse when all gone
   useEffect(() => {
@@ -130,12 +142,14 @@ export default function App() {
   }, [simulationRunning, handleEvent, sessions]);
 
   const handleToggleView = useCallback(() => {
+    // Skip toggle if this was a drag gesture, not a click
+    if (indicatorWasDragged) {
+      resetIndicatorDragState();
+      return;
+    }
     setIsExpanded(prev => !prev);
-  }, []);
+  }, [indicatorWasDragged, resetIndicatorDragState]);
 
-  const handleCollapse = useCallback(() => {
-    setIsExpanded(false);
-  }, []);
 
   const handleRunSimulation = useCallback(() => {
     clearAll();
@@ -165,13 +179,19 @@ export default function App() {
     }
   }, []);
 
-  const handleToggleStyle = useCallback(() => {
-    setListStyle(prev => prev === 'card' ? 'full-width' : 'card');
-  }, []);
 
-  const containerStyle = {
-    transform: `translateX(-50%) translate(${position.x}px, ${position.y}px)`,
-    cursor: isDragging ? 'grabbing' : undefined,
+  const indicatorContainerStyle = {
+    transform: `translateX(-50%) translate(${indicatorPosition.x}px, ${indicatorPosition.y}px)`,
+    cursor: isIndicatorDragging ? 'grabbing' : undefined,
+  };
+
+  const listContainerStyle: React.CSSProperties = {
+    position: 'fixed',
+    top: 30,
+    left: '50%',
+    transform: `translateX(-50%) translate(${listPosition.x}px, ${listPosition.y}px)`,
+    cursor: isListDragging ? 'grabbing' : undefined,
+    zIndex: 999,
   };
 
   if (showIconPreview) {
@@ -200,18 +220,21 @@ export default function App() {
 
   return (
     <>
-      <div className="prototype-container" style={containerStyle}>
-        <Indicator sessions={sessions} onClick={handleToggleView} onDragStart={handleMouseDown} />
-        {isExpanded && sessions.length > 0 && (
+      {/* Indicator with its own position */}
+      <div className="prototype-container" style={indicatorContainerStyle}>
+        <Indicator sessions={sessions} onClick={handleToggleView} onDragStart={handleIndicatorMouseDown} />
+      </div>
+
+      {/* Session list with independent position */}
+      {isExpanded && sessions.length > 0 && (
+        <div style={listContainerStyle}>
           <SessionList
             sessions={sessions}
-            onCollapse={handleCollapse}
-            listStyle={listStyle}
-            onDragStart={handleMouseDown}
+            onDragStart={handleListMouseDown}
             onRemoveSession={removeSession}
           />
-        )}
-      </div>
+        </div>
+      )}
 
       <button
         onClick={() => setShowIconPreview(true)}
@@ -236,9 +259,7 @@ export default function App() {
         onStopSimulation={handleStopSimulation}
         onAddSession={handleAddSession}
         onSetBackground={handleSetBackground}
-        onToggleStyle={handleToggleStyle}
         simulationRunning={simulationRunning}
-        listStyle={listStyle}
       />
     </>
   );

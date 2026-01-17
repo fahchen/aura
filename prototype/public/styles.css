@@ -242,15 +242,15 @@ body.bg-dark {
     inset 0 -1px 1px rgba(0, 0, 0, 0.05);
 }
 
-/* Header content: count and close button (default style) */
+/* Header content: centered session count, draggable */
 .session-list-header-content {
   position: relative;
   z-index: 3;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  height: 36px;
+  justify-content: center;
+  padding: 6px 12px;
+  height: 28px;
   cursor: grab;
 }
 
@@ -258,55 +258,23 @@ body.bg-dark {
   cursor: grabbing;
 }
 
-/* Default style: icon + number (larger with more spacing) */
+/* Centered "n sessions" text */
 .session-list-title {
   display: flex;
   align-items: center;
-  gap: 10px;
-  cursor: pointer;
-  transition: transform 0.1s ease;
-}
-
-.session-list-title:active {
-  transform: scale(0.95);
-}
-
-.session-list-title-icon {
-  font-size: 16px;
-  color: rgba(255, 255, 255, 0.6);
-}
-
-.session-list-title-count {
-  font-size: 16px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-}
-
-/* Compact style: centered "n sessions" text, no close button */
-.session-list.compact .session-list-header-content {
-  justify-content: center;
-  padding: 6px 12px;
-  height: 28px;
-}
-
-.session-list.compact .session-list-title {
   gap: 0;
 }
 
-.session-list.compact .session-list-title-icon {
+.session-list-title-icon {
   display: none;
 }
 
-.session-list.compact .session-list-title-count {
+.session-list-title-count {
   font-size: 11px;
   font-weight: 400;
   color: rgba(255, 255, 255, 0.5);
 }
 
-.session-list.compact .session-list-close {
-  display: none;
-}
 
 /* Upper layer: Sessions Container (z-index: 2) - Liquid Glass */
 .session-list-content {
@@ -340,25 +308,6 @@ body.bg-dark {
   display: none; /* Chrome/Safari/Opera */
 }
 
-.session-list-close {
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.4);
-  cursor: pointer;
-  border-radius: 4px;
-  font-size: 14px;
-  transition: all 0.15s ease;
-}
-
-.session-list-close:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.8);
-}
 
 /* Session Row - Neutral Liquid Glass */
 .session-row {
@@ -433,28 +382,6 @@ body.bg-dark {
 @keyframes breathe-glass {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 0.3; }
-}
-
-/* Full-width style variant */
-.session-list.full-width .session-list-content {
-  gap: 1px;
-  padding: 0;
-}
-
-.session-list.full-width .session-row {
-  border-radius: 0;
-}
-
-.session-list.full-width .session-row:first-child {
-  border-radius: 14px 14px 0 0;
-}
-
-.session-list.full-width .session-row:last-child {
-  border-radius: 0 0 14px 14px;
-}
-
-.session-list.full-width .session-row:only-child {
-  border-radius: 14px;
 }
 
 /* First row: icon + name */
@@ -725,37 +652,6 @@ body.bg-dark {
 
 #connection-status.error::before {
   background: #ef4444;
-}
-
-/* Context menu */
-.session-context-menu {
-  position: fixed;
-  background: rgba(30, 30, 40, 0.95);
-  border: 1px solid rgba(255,255,255,0.15);
-  border-radius: 6px;
-  padding: 4px 0;
-  min-width: 120px;
-  z-index: 1000;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-}
-
-.session-context-menu-item {
-  padding: 8px 12px;
-  cursor: pointer;
-  color: rgba(255,255,255,0.9);
-  font-size: 13px;
-}
-
-.session-context-menu-item:hover {
-  background: rgba(255,255,255,0.1);
-}
-
-.session-context-menu-item.danger {
-  color: #f87171;
-}
-
-.session-context-menu-item.danger:hover {
-  background: rgba(248, 113, 113, 0.15);
 }
 
 /* Hidden utility */
