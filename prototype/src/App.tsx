@@ -6,18 +6,18 @@ import { Controls } from './components/Controls';
 
 // Simulation events to demonstrate the HUD
 const SIMULATION_EVENTS = [
-  { type: 'SessionStart', sessionId: 'sess-1', cwd: '/Users/dev/project-alpha' },
+  { type: 'SessionStart', sessionId: 'sess-1', cwd: '/Users/dev/project-alpha', name: '修复登录问题' },
   { type: 'PreToolUse', sessionId: 'sess-1', toolId: 't1', toolName: 'Read', toolLabel: 'main.ts' },
   { type: 'PostToolUse', sessionId: 'sess-1', toolId: 't1' },
   { type: 'PreToolUse', sessionId: 'sess-1', toolId: 't2', toolName: 'Edit', toolLabel: 'config.json' },
-  { type: 'SessionStart', sessionId: 'sess-2', cwd: '/Users/dev/another-project' },
+  { type: 'SessionStart', sessionId: 'sess-2', cwd: '/Users/dev/another-project', name: 'This is a very long session name that should truncate' },
   { type: 'PreToolUse', sessionId: 'sess-1', toolId: 't3', toolName: 'Bash', toolLabel: 'npm test' },
   { type: 'PermissionRequest', sessionId: 'sess-1' },
   { type: 'PreToolUse', sessionId: 'sess-2', toolId: 't4', toolName: 'Grep', toolLabel: 'TODO' },
   { type: 'PostToolUse', sessionId: 'sess-1', toolId: 't2' },
   { type: 'PreToolUse', sessionId: 'sess-2', toolId: 't5', toolName: 'Write', toolLabel: 'output.txt' },
   { type: 'PostToolUse', sessionId: 'sess-1', toolId: 't3' },
-  { type: 'SessionStart', sessionId: 'sess-3', cwd: '/Users/dev/third-project', name: 'Custom Name' },
+  { type: 'SessionStart', sessionId: 'sess-3', cwd: '/Users/dev/third-project', name: '添加深色模式支持' },
   { type: 'PreCompact', sessionId: 'sess-1' },
   { type: 'PreToolUse', sessionId: 'sess-3', toolId: 't6', toolName: 'mcp__notion__search', toolLabel: 'docs' },
   { type: 'PostToolUse', sessionId: 'sess-2', toolId: 't4' },

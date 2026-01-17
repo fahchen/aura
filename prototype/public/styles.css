@@ -155,8 +155,7 @@ body.bg-dark {
 /* === SESSION LIST (Expanded View) - Liquid Glass === */
 .session-list {
   position: relative;
-  min-width: 300px;
-  max-width: 380px;
+  width: 320px;
   display: flex;
   flex-direction: column;
   transform-origin: top center;
