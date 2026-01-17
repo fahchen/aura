@@ -15,15 +15,15 @@ use std::time::Instant;
 use unicode_width::UnicodeWidthStr;
 
 /// Session list dimensions
-pub const WIDTH: f32 = 242.0; // STATUS_DOT + NAME + TOOL + gaps(16) + padding(16)
+pub const WIDTH: f32 = 424.0; // STATUS_DOT + NAME + TOOL + gaps(16) + padding(16)
 pub const ROW_HEIGHT: f32 = 32.0;
 pub const ROW_GAP: f32 = 4.0;
 pub const MAX_SESSIONS: usize = 5;
 
 /// Column widths for table-style layout
 pub const STATUS_DOT_WIDTH: f32 = 18.0;
-pub const SESSION_NAME_WIDTH: f32 = 80.0;
-pub const TOOL_COLUMN_WIDTH: f32 = 112.0; // ~√2× SESSION_NAME_WIDTH
+pub const SESSION_NAME_WIDTH: f32 = 156.0; // 20 chars
+pub const TOOL_COLUMN_WIDTH: f32 = 218.4; // 28 chars
 
 /// Render the content of a session row (status dot + name + tool)
 ///
@@ -145,8 +145,8 @@ pub fn render_current_tool(
 
 /// Icon width for consistent alignment (Nerd Font icons vary in width)
 const TOOL_ICON_WIDTH: f32 = 16.0;
-/// Max characters for tool label display (approximate fit for column width)
-const TOOL_LABEL_MAX_CHARS: usize = 12;
+/// Max characters for tool label display (28 chars for wider column)
+const TOOL_LABEL_MAX_CHARS: usize = 28;
 
 /// Truncate string intelligently based on content type
 /// - Paths: truncate prefix ("...filename.rs")
