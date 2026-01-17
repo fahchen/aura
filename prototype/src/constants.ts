@@ -24,7 +24,7 @@ export const STATE_OPACITY: Record<SessionState, number> = {
   idle: 0.8,
   attention: 1,
   compacting: 0.9,
-  stale: 0.6,
+  stale: 0.8,
 };
 
 // Indicator icons include no-sessions state

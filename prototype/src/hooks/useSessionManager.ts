@@ -1,7 +1,5 @@
-import { useState, useRef, useCallback } from 'react';
-import type { Session, RunningTool, SessionState } from '../types';
-
-const STALE_TIMEOUT_MS = 60_000; // 60 seconds
+import { useState, useCallback } from 'react';
+import type { Session, RunningTool } from '../types';
 
 interface SessionEvent {
   type: string;
@@ -15,34 +13,6 @@ interface SessionEvent {
 
 export function useSessionManager() {
   const [sessions, setSessions] = useState<Session[]>([]);
-  const staleTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-
-  const resetStaleTimer = useCallback((sessionId: string) => {
-    // Clear existing timer
-    const existingTimer = staleTimers.current.get(sessionId);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-    }
-
-    // Set new timer
-    const timer = setTimeout(() => {
-      setSessions(prev =>
-        prev.map(s =>
-          s.sessionId === sessionId ? { ...s, state: 'stale' as SessionState } : s
-        )
-      );
-    }, STALE_TIMEOUT_MS);
-
-    staleTimers.current.set(sessionId, timer);
-  }, []);
-
-  const clearStaleTimer = useCallback((sessionId: string) => {
-    const timer = staleTimers.current.get(sessionId);
-    if (timer) {
-      clearTimeout(timer);
-      staleTimers.current.delete(sessionId);
-    }
-  }, []);
 
   const handleEvent = useCallback((msg: SessionEvent) => {
     const { type, sessionId } = msg;
@@ -50,7 +20,6 @@ export function useSessionManager() {
     switch (type) {
       case 'SessionStart': {
         setSessions(prev => {
-          // Check if session already exists
           if (prev.some(s => s.sessionId === sessionId)) {
             return prev;
           }
@@ -65,7 +34,6 @@ export function useSessionManager() {
             },
           ];
         });
-        resetStaleTimer(sessionId);
         break;
       }
 
@@ -78,7 +46,6 @@ export function useSessionManager() {
         setSessions(prev =>
           prev.map(s => {
             if (s.sessionId !== sessionId) return s;
-            // Avoid duplicate tools
             if (s.runningTools.some(t => t.toolId === tool.toolId)) return s;
             return {
               ...s,
@@ -87,7 +54,6 @@ export function useSessionManager() {
             };
           })
         );
-        resetStaleTimer(sessionId);
         break;
       }
 
@@ -101,7 +67,6 @@ export function useSessionManager() {
             };
           })
         );
-        resetStaleTimer(sessionId);
         break;
       }
 
@@ -111,7 +76,6 @@ export function useSessionManager() {
             s.sessionId === sessionId ? { ...s, state: 'attention' } : s
           )
         );
-        resetStaleTimer(sessionId);
         break;
       }
 
@@ -123,7 +87,6 @@ export function useSessionManager() {
               : s
           )
         );
-        resetStaleTimer(sessionId);
         break;
       }
 
@@ -133,17 +96,14 @@ export function useSessionManager() {
             s.sessionId === sessionId ? { ...s, state: 'compacting' } : s
           )
         );
-        resetStaleTimer(sessionId);
         break;
       }
 
       case 'SessionEnd': {
-        clearStaleTimer(sessionId);
         setSessions(prev => prev.filter(s => s.sessionId !== sessionId));
         break;
       }
 
-      // Health check events - set to running
       case 'Notification':
       case 'SubagentStop':
       case 'UserPromptSubmit': {
@@ -152,21 +112,12 @@ export function useSessionManager() {
             s.sessionId === sessionId ? { ...s, state: 'running' } : s
           )
         );
-        resetStaleTimer(sessionId);
         break;
       }
-
-      default:
-        // Unknown event type, just reset stale timer if session exists
-        resetStaleTimer(sessionId);
-        break;
     }
-  }, [resetStaleTimer, clearStaleTimer]);
+  }, []);
 
   const clearAll = useCallback(() => {
-    // Clear all stale timers
-    staleTimers.current.forEach(timer => clearTimeout(timer));
-    staleTimers.current.clear();
     setSessions([]);
   }, []);
 
