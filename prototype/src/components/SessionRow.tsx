@@ -1,12 +1,14 @@
-import React, { memo, useState, useEffect, useRef } from 'react';
+import React, { memo, useState, useEffect, useRef, useCallback } from 'react';
 import type { Session } from '../types';
 import { STATE_ICONS, STATE_OPACITY, getToolIcon, getRandomPlaceholder } from '../constants';
+import { Bomb } from 'lucide-react';
 
 interface SessionRowProps {
   session: Session;
+  onRemove?: (sessionId: string) => void;
 }
 
-function SessionRowInner({ session }: SessionRowProps) {
+function SessionRowInner({ session, onRemove }: SessionRowProps) {
   const { sessionId, cwd, name, state, runningTools } = session;
   const [toolIndex, setToolIndex] = useState(0);
   const isFirstMount = useRef(true);
@@ -36,12 +38,18 @@ function SessionRowInner({ session }: SessionRowProps) {
   // Mark first mount complete after initial render
   useEffect(() => {
     if (isFirstMount.current) {
-      // Use requestAnimationFrame to ensure animation plays, then mark as mounted
       requestAnimationFrame(() => {
         isFirstMount.current = false;
       });
     }
   }, []);
+
+  const handleRemove = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onRemove) {
+      onRemove(sessionId);
+    }
+  }, [onRemove, sessionId]);
 
   // Extract display name
   const displayName = name ?? cwd.split('/').filter(Boolean).pop() ?? 'Unknown';
@@ -60,6 +68,7 @@ function SessionRowInner({ session }: SessionRowProps) {
     'state-indicator',
     state === 'attention' ? 'attention' : '',
     state === 'compacting' ? 'compacting' : '',
+    onRemove ? 'replaceable' : '',
   ].filter(Boolean).join(' ');
 
   const StateIcon = STATE_ICONS[state];
@@ -67,8 +76,19 @@ function SessionRowInner({ session }: SessionRowProps) {
   return (
     <div className={rowClasses} data-session-id={sessionId}>
       <div className="session-header">
-        <div className={stateIndicatorClasses} style={{ opacity: STATE_OPACITY[state] }}>
-          <StateIcon size={14} strokeWidth={2} />
+        <div
+          className={stateIndicatorClasses}
+          style={{ opacity: STATE_OPACITY[state] }}
+          onClick={onRemove ? handleRemove : undefined}
+        >
+          <span className="state-icon-default">
+            <StateIcon size={14} strokeWidth={2} />
+          </span>
+          {onRemove && (
+            <span className="state-icon-remove">
+              <Bomb size={14} strokeWidth={2} />
+            </span>
+          )}
         </div>
         <div className="session-name">
           <span className="session-name-text">{displayName}</span>
@@ -91,4 +111,9 @@ function SessionRowInner({ session }: SessionRowProps) {
 }
 
 // Memoize to prevent unnecessary re-renders
-export const SessionRow = memo(SessionRowInner);
+export const SessionRow = memo(SessionRowInner, (prevProps, nextProps) => {
+  return (
+    prevProps.session === nextProps.session &&
+    prevProps.onRemove === nextProps.onRemove
+  );
+});

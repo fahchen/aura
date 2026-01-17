@@ -7,9 +7,16 @@ interface SessionListProps {
   onCollapse: () => void;
   listStyle: 'card' | 'full-width';
   onDragStart?: (e: React.MouseEvent) => void;
+  onRemoveSession?: (sessionId: string) => void;
 }
 
-export function SessionList({ sessions, onCollapse, listStyle, onDragStart }: SessionListProps) {
+export function SessionList({
+  sessions,
+  onCollapse,
+  listStyle,
+  onDragStart,
+  onRemoveSession,
+}: SessionListProps) {
   const sessionCount = sessions.length;
 
   return (
@@ -33,7 +40,11 @@ export function SessionList({ sessions, onCollapse, listStyle, onDragStart }: Se
       {/* Sessions container */}
       <div className="session-list-content">
         {sessions.map(session => (
-          <SessionRow key={session.sessionId} session={session} />
+          <SessionRow
+            key={session.sessionId}
+            session={session}
+            onRemove={onRemoveSession}
+          />
         ))}
       </div>
     </div>

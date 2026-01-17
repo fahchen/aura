@@ -40,7 +40,7 @@ function getRandomToolEvent(toolId: number): { type: string; sessionId: string; 
 const SIMULATION_INTERVAL_MS = 800;
 
 export default function App() {
-  const { sessions, handleEvent, clearAll } = useSessionManager();
+  const { sessions, handleEvent, clearAll, removeSession } = useSessionManager();
   const [isExpanded, setIsExpanded] = useState(false);
   const [bgClass, setBgClass] = useState('');
   const [bgImage, setBgImage] = useState<string | null>(null);
@@ -182,6 +182,7 @@ export default function App() {
             onCollapse={handleCollapse}
             listStyle={listStyle}
             onDragStart={handleMouseDown}
+            onRemoveSession={removeSession}
           />
         )}
       </div>

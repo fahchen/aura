@@ -130,5 +130,9 @@ export function useSessionManager() {
     setSessions([]);
   }, []);
 
-  return { sessions, handleEvent, clearAll };
+  const removeSession = useCallback((sessionId: string) => {
+    setSessions(prev => prev.filter(s => s.sessionId !== sessionId));
+  }, []);
+
+  return { sessions, handleEvent, clearAll, removeSession };
 }

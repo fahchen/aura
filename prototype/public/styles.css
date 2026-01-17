@@ -527,6 +527,47 @@ body.bg-dark {
   to { transform: rotate(360deg); }
 }
 
+/* Replace-icon mode: icon replaces state icon on hover with slide transition */
+.state-indicator.replaceable {
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Both icons stack on top of each other */
+.state-indicator.replaceable .state-icon-default,
+.state-indicator.replaceable .state-icon-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+}
+
+/* Default icon - visible, in position */
+.state-indicator.replaceable .state-icon-default {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+/* Remove icon - hidden to the left */
+.state-indicator.replaceable .state-icon-remove {
+  position: absolute;
+  inset: 0;
+  transform: translateX(-16px);
+  opacity: 0;
+}
+
+/* On hover: default slides right and fades, remove slides in from left */
+.session-row:hover .state-indicator.replaceable .state-icon-default {
+  transform: translateX(16px);
+  opacity: 0;
+}
+
+.session-row:hover .state-indicator.replaceable .state-icon-remove {
+  transform: translateX(0);
+  opacity: 1;
+}
+
 /* Session Name */
 .session-name {
   flex: 1;
@@ -692,6 +733,37 @@ body.bg-dark {
 
 #connection-status.error::before {
   background: #ef4444;
+}
+
+/* Context menu */
+.session-context-menu {
+  position: fixed;
+  background: rgba(30, 30, 40, 0.95);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  padding: 4px 0;
+  min-width: 120px;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.session-context-menu-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  color: rgba(255,255,255,0.9);
+  font-size: 13px;
+}
+
+.session-context-menu-item:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+.session-context-menu-item.danger {
+  color: #f87171;
+}
+
+.session-context-menu-item.danger:hover {
+  background: rgba(248, 113, 113, 0.15);
 }
 
 /* Hidden utility */
