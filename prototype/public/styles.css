@@ -563,6 +563,7 @@ body.bg-dark {
 /* Session Name */
 .session-name {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
 }
 

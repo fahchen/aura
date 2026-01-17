@@ -8,12 +8,13 @@ import { IconPreview } from './IconPreview';
 
 // Initial setup events
 const SETUP_EVENTS = [
-  // Start 5 sessions to show all states at once
-  { type: 'SessionStart', sessionId: 'sess-running', cwd: '/Users/dev/project', name: 'Running State' },
-  { type: 'SessionStart', sessionId: 'sess-idle', cwd: '/Users/dev/project', name: 'Idle State' },
-  { type: 'SessionStart', sessionId: 'sess-attention', cwd: '/Users/dev/project', name: 'Attention State' },
-  { type: 'SessionStart', sessionId: 'sess-compacting', cwd: '/Users/dev/project', name: 'Compacting State' },
-  { type: 'SessionStart', sessionId: 'sess-stale', cwd: '/Users/dev/project', name: 'Stale State' },
+  // Start sessions with English, Chinese, Japanese mix (including long names)
+  { type: 'SessionStart', sessionId: 'sess-running', cwd: '/Users/dev/project', name: 'Fix Login' },
+  { type: 'SessionStart', sessionId: 'sess-idle', cwd: '/Users/dev/project', name: 'Implement User Authentication Flow' },
+  { type: 'SessionStart', sessionId: 'sess-attention', cwd: '/Users/dev/project', name: 'バグ修正と機能追加' },
+  { type: 'SessionStart', sessionId: 'sess-compacting', cwd: '/Users/dev/project', name: '重构用户认证模块并优化性能' },
+  { type: 'SessionStart', sessionId: 'sess-stale', cwd: '/Users/dev/project', name: 'API追加' },
+  { type: 'SessionStart', sessionId: 'sess-long', cwd: '/Users/dev/project', name: 'Refactor Database Connection Pooling and Implement Retry Logic with Exponential Backoff' },
 
   // Set each session to its state
   { type: 'PreToolUse', sessionId: 'sess-running', toolId: 't1', toolName: 'Read', toolLabel: 'main.ts' },
@@ -21,23 +22,46 @@ const SETUP_EVENTS = [
   { type: 'PermissionRequest', sessionId: 'sess-attention' },
   { type: 'PreCompact', sessionId: 'sess-compacting' },
   { type: 'Stale', sessionId: 'sess-stale' },
+  { type: 'PreToolUse', sessionId: 'sess-long', toolId: 't2', toolName: 'Edit', toolLabel: 'db/pool.ts' },
 ];
 
 // Random tool names and labels for continuous simulation
 const TOOL_NAMES = ['Read', 'Edit', 'Write', 'Bash', 'Grep', 'Glob', 'Task', 'WebFetch', 'mcp__notion__search'];
 const TOOL_LABELS = ['main.ts', 'config.json', 'index.tsx', 'npm test', 'TODO', 'src/**/*.ts', 'refactor', 'docs', 'api.ts'];
 
-function getRandomToolEvent(toolId: number): { type: string; sessionId: string; toolId: string; toolName: string; toolLabel: string } {
+function getRandomToolEvent(sessionId: string, toolId: number): { type: string; sessionId: string; toolId: string; toolName: string; toolLabel: string } {
   return {
     type: 'PreToolUse',
-    sessionId: 'sess-running',
+    sessionId,
     toolId: `t${toolId}`,
     toolName: TOOL_NAMES[Math.floor(Math.random() * TOOL_NAMES.length)],
     toolLabel: TOOL_LABELS[Math.floor(Math.random() * TOOL_LABELS.length)],
   };
 }
 
-const SIMULATION_INTERVAL_MS = 800;
+// Event cycle: cycles through all states for any session
+function getEventCycle(sessionId: string, step: number, cycleIndex: number) {
+  const events = [
+    // Running with tools (0-3)
+    getRandomToolEvent(sessionId, step * 100 + cycleIndex),
+    getRandomToolEvent(sessionId, step * 100 + cycleIndex + 1),
+    { type: 'PostToolUse', sessionId, toolId: `t${step * 100 + cycleIndex}` },
+    { type: 'PostToolUse', sessionId, toolId: `t${step * 100 + cycleIndex + 1}` },
+    // Idle (4)
+    { type: 'Stop', sessionId },
+    // Attention (5)
+    { type: 'PermissionRequest', sessionId },
+    // Compacting (6)
+    { type: 'PreCompact', sessionId },
+    // Stale (7)
+    { type: 'Stale', sessionId },
+    // Back to running (8)
+    { type: 'UserPromptSubmit', sessionId },
+  ];
+  return events[cycleIndex % events.length];
+}
+
+const SIMULATION_INTERVAL_MS = 3000;
 
 export default function App() {
   const { sessions, handleEvent, clearAll, removeSession } = useSessionManager();
@@ -89,19 +113,21 @@ export default function App() {
         return;
       }
 
-      // Then continuously send random tool events for running session
-      const toolId = simulationStep.current;
-      // Alternate between PreToolUse and PostToolUse
-      if (toolId % 2 === 0) {
-        handleEvent(getRandomToolEvent(toolId));
-      } else {
-        handleEvent({ type: 'PostToolUse', sessionId: 'sess-running', toolId: `t${toolId - 1}` });
-      }
+      const step = simulationStep.current;
+
+      // Cycle all sessions through events (offset each session so they're not in sync)
+      // Skip sessions that are stale
+      sessions.forEach((session, index) => {
+        if (session.state === 'stale') return;
+        const cycleIndex = (step + index * 3) % 9; // 9 events in cycle, offset by 3
+        handleEvent(getEventCycle(session.sessionId, step, cycleIndex));
+      });
+
       simulationStep.current += 1;
     }, SIMULATION_INTERVAL_MS);
 
     return () => clearInterval(interval);
-  }, [simulationRunning, handleEvent]);
+  }, [simulationRunning, handleEvent, sessions]);
 
   const handleToggleView = useCallback(() => {
     setIsExpanded(prev => !prev);
