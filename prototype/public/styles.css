@@ -29,12 +29,21 @@ body.bg-dark {
   left: 50%;
   transform: translateX(-50%);
   z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 320px;
 }
 
 /* === INDICATOR (Collapsed View) === */
 .indicator {
-  cursor: pointer;
+  cursor: grab;
   transition: opacity 0.3s ease;
+}
+
+.indicator:active {
+  cursor: grabbing;
 }
 
 .indicator-circle {
@@ -223,6 +232,11 @@ body.bg-dark {
   justify-content: space-between;
   padding: 8px 12px;
   height: 36px;
+  cursor: grab;
+}
+
+.session-list-header-content:active {
+  cursor: grabbing;
 }
 
 /* Default style: icon + number (larger with more spacing) */
@@ -230,6 +244,12 @@ body.bg-dark {
   display: flex;
   align-items: center;
   gap: 10px;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.session-list-title:active {
+  transform: scale(0.95);
 }
 
 .session-list-title-icon {

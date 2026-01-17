@@ -5,6 +5,7 @@ import { INDICATOR_ICONS } from '../constants';
 interface IndicatorProps {
   sessions: Session[];
   onClick: () => void;
+  onDragStart?: (e: React.MouseEvent) => void;
 }
 
 type AggregateState = SessionState | 'no-sessions';
@@ -26,14 +27,18 @@ function getAggregateState(sessions: Session[]): AggregateState {
   return 'no-sessions';
 }
 
-export function Indicator({ sessions, onClick }: IndicatorProps) {
+export function Indicator({ sessions, onClick, onDragStart }: IndicatorProps) {
   const aggregateState = getAggregateState(sessions);
   const Icon = INDICATOR_ICONS[aggregateState];
 
   const indicatorClasses = ['indicator', aggregateState].join(' ');
 
   return (
-    <div className={indicatorClasses} onClick={onClick}>
+    <div
+      className={indicatorClasses}
+      onClick={onClick}
+      onMouseDown={onDragStart}
+    >
       <div className="indicator-circle">
         <div className="indicator-gloss" />
         <div className="indicator-icon">

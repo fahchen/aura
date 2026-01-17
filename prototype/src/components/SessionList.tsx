@@ -6,11 +6,12 @@ interface SessionListProps {
   sessions: Session[];
   onCollapse: () => void;
   listStyle: 'card' | 'full-width';
+  onDragStart?: (e: React.MouseEvent) => void;
 }
 
 const MAX_VISIBLE_SESSIONS = 5;
 
-export function SessionList({ sessions, onCollapse, listStyle }: SessionListProps) {
+export function SessionList({ sessions, onCollapse, listStyle, onDragStart }: SessionListProps) {
   const visibleSessions = sessions.slice(0, MAX_VISIBLE_SESSIONS);
   const sessionCount = sessions.length;
 
@@ -19,9 +20,9 @@ export function SessionList({ sessions, onCollapse, listStyle }: SessionListProp
       {/* Background layer */}
       <div className="session-list-header" />
 
-      {/* Header content - compact style */}
-      <div className="session-list-header-content">
-        <div className="session-list-title">
+      {/* Header content - compact style, draggable */}
+      <div className="session-list-header-content" onMouseDown={onDragStart}>
+        <div className="session-list-title" onClick={onCollapse}>
           <span className="session-list-title-icon">{'\uf489'}</span>
           <span className="session-list-title-count">
             {sessionCount} session{sessionCount !== 1 ? 's' : ''}

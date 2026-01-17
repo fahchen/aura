@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSessionManager } from './hooks/useSessionManager';
+import { useDrag } from './hooks/useDrag';
 import { Indicator } from './components/Indicator';
 import { SessionList } from './components/SessionList';
 import { Controls } from './components/Controls';
@@ -39,15 +40,25 @@ export default function App() {
   const [simulationRunning, setSimulationRunning] = useState(false);
   const [listStyle, setListStyle] = useState<'card' | 'full-width'>('card');
   const simulationStep = useRef(0);
+  const prevSessionCount = useRef(0);
+  const { position, isDragging, handleMouseDown } = useDrag();
 
-  // Auto-expand when sessions appear, auto-collapse when empty
+  // Auto-expand when sessions first appear, auto-collapse when all gone
   useEffect(() => {
-    if (sessions.length > 0 && !isExpanded) {
+    const hadSessions = prevSessionCount.current > 0;
+    const hasSessions = sessions.length > 0;
+
+    // Only auto-expand when going from 0 to >0 sessions
+    if (!hadSessions && hasSessions) {
       setIsExpanded(true);
-    } else if (sessions.length === 0 && isExpanded) {
+    }
+    // Auto-collapse when all sessions are gone
+    else if (hadSessions && !hasSessions) {
       setIsExpanded(false);
     }
-  }, [sessions.length, isExpanded]);
+
+    prevSessionCount.current = sessions.length;
+  }, [sessions.length]);
 
   // Apply background class and image to body
   useEffect(() => {
@@ -85,10 +96,6 @@ export default function App() {
     setIsExpanded(false);
   }, []);
 
-  const handleExpand = useCallback(() => {
-    setIsExpanded(true);
-  }, []);
-
   const handleRunSimulation = useCallback(() => {
     clearAll();
     simulationStep.current = 0;
@@ -121,13 +128,22 @@ export default function App() {
     setListStyle(prev => prev === 'card' ? 'full-width' : 'card');
   }, []);
 
+  const containerStyle = {
+    transform: `translateX(-50%) translate(${position.x}px, ${position.y}px)`,
+    cursor: isDragging ? 'grabbing' : undefined,
+  };
+
   return (
     <>
-      <div className="prototype-container">
-        {isExpanded ? (
-          <SessionList sessions={sessions} onCollapse={handleCollapse} listStyle={listStyle} />
-        ) : (
-          <Indicator sessions={sessions} onClick={handleExpand} />
+      <div className="prototype-container" style={containerStyle}>
+        <Indicator sessions={sessions} onClick={handleToggleView} onDragStart={handleMouseDown} />
+        {isExpanded && sessions.length > 0 && (
+          <SessionList
+            sessions={sessions}
+            onCollapse={handleCollapse}
+            listStyle={listStyle}
+            onDragStart={handleMouseDown}
+          />
         )}
       </div>
 
