@@ -612,8 +612,7 @@ body.bg-dark {
 
 .tool-icon {
   flex-shrink: 0;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .tool-label {

@@ -19,6 +19,20 @@ import {
   BellRing,
   MessageSquareCode,
   Panda,
+  // Tool icons
+  Bot,
+  Terminal,
+  BookSearch,
+  FileSearchCorner,
+  Newspaper,
+  FilePenLine,
+  FileBracesCorner,
+  Globe,
+  Binoculars,
+  MonitorDown,
+  Plug,
+  Ticket,
+  type LucideIcon,
 } from 'lucide-react';
 
 const iconSize = 24;
@@ -49,6 +63,31 @@ const indicatorIcons = [
   { name: 'idle: Panda (no sessions)', Icon: Panda },
   { name: 'attention: BellRing (static)', Icon: BellRing },
   { name: 'running: (cycles creative icons)', Icon: WandSparkles },
+];
+
+const placeholderTexts = [
+  'thinking...',
+  'drafting...',
+  'building...',
+  'planning...',
+  'analyzing...',
+  'pondering...',
+  'processing...',
+  'reasoning...',
+];
+
+const toolIcons: { name: string; Icon: LucideIcon; example: string }[] = [
+  { name: 'Task', Icon: Bot, example: 'refactor auth' },
+  { name: 'Bash', Icon: Terminal, example: 'npm test' },
+  { name: 'Glob', Icon: BookSearch, example: 'src/**/*.ts' },
+  { name: 'Grep', Icon: FileSearchCorner, example: 'TODO' },
+  { name: 'Read', Icon: Newspaper, example: 'main.ts' },
+  { name: 'Edit', Icon: FilePenLine, example: 'config.json' },
+  { name: 'Write', Icon: FileBracesCorner, example: 'index.tsx' },
+  { name: 'WebFetch', Icon: MonitorDown, example: 'docs' },
+  { name: 'WebSearch', Icon: Binoculars, example: 'api reference' },
+  { name: 'mcp__*', Icon: Plug, example: 'notion search' },
+  { name: '(default)', Icon: Ticket, example: 'custom tool' },
 ];
 
 const styles: Record<string, React.CSSProperties> = {
@@ -88,6 +127,40 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'rgba(255,255,255,0.7)',
     textAlign: 'center',
   },
+  lucideIcon: {
+    color: 'rgba(255,255,255,0.9)',
+  },
+  placeholder: {
+    fontFamily: "'Maple Mono NF CN', monospace",
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.5)',
+  },
+  toolExample: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '4px 8px',
+    background: 'rgba(255,255,255,0.08)',
+    borderRadius: 6,
+    fontFamily: "'Maple Mono NF CN', monospace",
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.9)',
+  },
+  toolExampleIcon: {
+    color: 'rgba(255,255,255,0.7)',
+    flexShrink: 0,
+  },
+  wideCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 10,
+    padding: 16,
+    background: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.1)',
+    minWidth: 160,
+  },
 };
 
 export function IconPreview() {
@@ -124,6 +197,33 @@ export function IconPreview() {
             <div key={name} style={styles.card}>
               <Icon size={iconSize} />
               <span style={styles.label}>{name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={styles.section}>
+        <div style={styles.title}>Tool Icons (Lucide)</div>
+        <div style={styles.grid}>
+          {toolIcons.map(({ name, Icon, example }) => (
+            <div key={name} style={styles.wideCard}>
+              <Icon size={iconSize} style={styles.lucideIcon} />
+              <span style={styles.label}>{name}</span>
+              <div style={styles.toolExample}>
+                <Icon size={12} style={styles.toolExampleIcon} />
+                <span>{example}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={styles.section}>
+        <div style={styles.title}>Placeholder Texts</div>
+        <div style={styles.grid}>
+          {placeholderTexts.map((text) => (
+            <div key={text} style={styles.card}>
+              <span style={styles.placeholder}>{text}</span>
             </div>
           ))}
         </div>

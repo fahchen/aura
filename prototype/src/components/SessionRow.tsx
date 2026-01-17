@@ -97,7 +97,10 @@ function SessionRowInner({ session, onRemove }: SessionRowProps) {
       <div className="session-event">
         {currentTool ? (
           <div className="tool-item">
-            <span className="tool-icon">{getToolIcon(currentTool.toolName)}</span>
+            {(() => {
+              const ToolIcon = getToolIcon(currentTool.toolName);
+              return <ToolIcon size={12} strokeWidth={2} className="tool-icon" />;
+            })()}
             <span className="tool-label">
               {currentTool.toolLabel ?? currentTool.toolName}
             </span>

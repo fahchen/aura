@@ -18,6 +18,17 @@ import {
   Cpu,
   Puzzle,
   Orbit,
+  Terminal,
+  FileSearchCorner,
+  BookSearch,
+  Newspaper,
+  FilePenLine,
+  FileBracesCorner,
+  Globe,
+  Binoculars,
+  MonitorDown,
+  Plug,
+  Ticket,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -60,19 +71,19 @@ export const CREATIVE_ICONS: LucideIcon[] = [
   Orbit,
 ];
 
-// Tool icons mapping (still using Nerd Font for tools)
-export const TOOL_ICONS: Record<string, string> = {
-  Task: '\uf544',      // robot
-  Bash: '\ue795',      // terminal
-  Glob: '\uf07b',      // folder
-  Grep: '\uf002',      // search
-  Read: '\uf02d',      // book
-  Edit: '\uf044',      // pencil
-  Write: '\uf15c',     // file
-  WebFetch: '\uf0ac',  // globe
-  WebSearch: '\uf002', // search
-  default: '\uf013',   // gear
-  mcp: '\uf1e6',       // plug
+// Tool icons mapping (Lucide icons)
+export const TOOL_ICONS: Record<string, LucideIcon> = {
+  Task: Bot,
+  Bash: Terminal,
+  Glob: BookSearch,
+  Grep: FileSearchCorner,
+  Read: Newspaper,
+  Edit: FilePenLine,
+  Write: FileBracesCorner,
+  WebFetch: MonitorDown,
+  WebSearch: Binoculars,
+  default: Ticket,
+  mcp: Plug,
 };
 
 // Placeholder texts when no tools are running
@@ -90,7 +101,7 @@ export const PLACEHOLDER_TEXTS = [
 /**
  * Get the icon for a tool name
  */
-export function getToolIcon(toolName: string): string {
+export function getToolIcon(toolName: string): LucideIcon {
   // Check for MCP tools (start with mcp__)
   if (toolName.startsWith('mcp__')) {
     return TOOL_ICONS.mcp;
