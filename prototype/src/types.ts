@@ -14,4 +14,5 @@ export interface Session {
   runningTools: RunningTool[];
   stoppedAt?: number;
   staleAt?: number;
+  permissionTool?: string;
 }

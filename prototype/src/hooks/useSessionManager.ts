@@ -73,7 +73,9 @@ export function useSessionManager() {
       case 'PermissionRequest': {
         setSessions(prev =>
           prev.map(s =>
-            s.sessionId === sessionId ? { ...s, state: 'attention' } : s
+            s.sessionId === sessionId
+              ? { ...s, state: 'attention', permissionTool: msg.toolName }
+              : s
           )
         );
         break;

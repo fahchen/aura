@@ -19,7 +19,7 @@ const SETUP_EVENTS = [
   // Set each session to its state
   { type: 'PreToolUse', sessionId: 'sess-running', toolId: 't1', toolName: 'Read', toolLabel: 'main.ts' },
   { type: 'Stop', sessionId: 'sess-idle' },
-  { type: 'PermissionRequest', sessionId: 'sess-attention' },
+  { type: 'PermissionRequest', sessionId: 'sess-attention', toolName: 'Bash' },
   { type: 'PreCompact', sessionId: 'sess-compacting' },
   { type: 'Stale', sessionId: 'sess-stale' },
   { type: 'PreToolUse', sessionId: 'sess-long', toolId: 't2', toolName: 'Edit', toolLabel: 'db/pool.ts' },
@@ -50,7 +50,7 @@ function getEventCycle(sessionId: string, step: number, cycleIndex: number) {
     // Idle (4)
     { type: 'Stop', sessionId },
     // Attention (5)
-    { type: 'PermissionRequest', sessionId },
+    { type: 'PermissionRequest', sessionId, toolName: TOOL_NAMES[Math.floor(Math.random() * TOOL_NAMES.length)] },
     // Compacting (6)
     { type: 'PreCompact', sessionId },
     // Stale (7)

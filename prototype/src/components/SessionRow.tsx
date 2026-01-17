@@ -19,7 +19,7 @@ function formatDateTime(timestamp: number): string {
 }
 
 function SessionRowInner({ session, onRemove }: SessionRowProps) {
-  const { sessionId, cwd, name, state, runningTools, stoppedAt, staleAt } = session;
+  const { sessionId, cwd, name, state, runningTools, stoppedAt, staleAt, permissionTool } = session;
   const [toolIndex, setToolIndex] = useState(0);
   const isFirstMount = useRef(true);
   const placeholderRef = useRef(getRandomPlaceholder());
@@ -105,7 +105,15 @@ function SessionRowInner({ session, onRemove }: SessionRowProps) {
         </div>
       </div>
       <div className="session-event">
-        {currentTool ? (
+        {state === 'idle' && stoppedAt ? (
+          <span className="tool-placeholder">waiting since {formatDateTime(stoppedAt)}</span>
+        ) : state === 'stale' && staleAt ? (
+          <span className="tool-placeholder">inactive since {formatDateTime(staleAt)}</span>
+        ) : state === 'attention' ? (
+          <span className="tool-placeholder">{permissionTool ?? 'Tool'} needs permission</span>
+        ) : state === 'compacting' ? (
+          <span className="tool-placeholder">compacting context...</span>
+        ) : currentTool ? (
           <div className="tool-item">
             {(() => {
               const ToolIcon = getToolIcon(currentTool.toolName);
@@ -116,13 +124,7 @@ function SessionRowInner({ session, onRemove }: SessionRowProps) {
             </span>
           </div>
         ) : (
-          <span className="tool-placeholder">
-            {state === 'idle' && stoppedAt
-              ? `waiting since ${formatDateTime(stoppedAt)}`
-              : state === 'stale' && staleAt
-                ? `inactive since ${formatDateTime(staleAt)}`
-                : placeholderRef.current}
-          </span>
+          <span className="tool-placeholder">{placeholderRef.current}</span>
         )}
       </div>
     </div>
