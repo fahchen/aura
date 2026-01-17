@@ -16,19 +16,22 @@ export function SessionList({
   const sessionCount = sessions.length;
 
   return (
-    <div className="session-list">
+    <div className="relative w-80 flex flex-col origin-top animate-expand-in">
       {/* Background layer */}
-      <div className="session-list-header" />
+      <div className="glass-session-list-bg z-[1]" />
 
       {/* Header content - draggable */}
-      <div className="session-list-header-content" onMouseDown={onDragStart}>
-        <span className="session-list-title-count">
+      <div
+        className="relative z-[3] flex items-center justify-center px-3 py-1.5 h-7 cursor-grab active:cursor-grabbing"
+        onMouseDown={onDragStart}
+      >
+        <span className="text-[11px] font-normal text-white/50">
           {sessionCount} session{sessionCount !== 1 ? 's' : ''}
         </span>
       </div>
 
       {/* Sessions container */}
-      <div className="session-list-content">
+      <div className="glass-session-content z-[2]">
         {sessions.map(session => (
           <SessionRow
             key={session.sessionId}

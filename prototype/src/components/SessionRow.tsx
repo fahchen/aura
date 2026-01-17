@@ -67,64 +67,76 @@ function SessionRowInner({ session, onRemove }: SessionRowProps) {
   // Get current tool
   const currentTool = runningTools[toolIndex];
 
-  // Build class names
+  // Build row classes
   const rowClasses = [
-    'session-row',
-    state,
-    isFirstMount.current ? 'slideIn' : '',
+    'group glass-session-row',
+    isFirstMount.current ? 'animate-slide-in' : '',
+    state === 'idle' ? 'opacity-70' : '',
+    state === 'stale' ? 'opacity-50 animate-breathe' : '',
+    state === 'attention' ? 'shadow-attention' : '',
   ].filter(Boolean).join(' ');
 
+  // State indicator classes
   const stateIndicatorClasses = [
-    'state-indicator',
-    state === 'attention' ? 'attention' : '',
-    state === 'compacting' ? 'compacting' : '',
-    onRemove ? 'replaceable' : '',
+    'shrink-0 w-4 h-4 flex items-center justify-center',
+    'font-mono text-sm text-white/70 text-shadow-sm',
+    state === 'attention' ? 'animate-shake' : '',
+    onRemove ? 'cursor-pointer relative overflow-hidden' : '',
   ].filter(Boolean).join(' ');
 
   const StateIcon = STATE_ICONS[state];
+  const opacity = STATE_OPACITY[state];
 
   return (
     <div className={rowClasses} data-session-id={sessionId}>
-      <div className="session-header">
+      <div className="flex flex-row items-center gap-2">
         <div
           className={stateIndicatorClasses}
-          style={{ opacity: STATE_OPACITY[state] }}
+          style={{ opacity }}
           onClick={onRemove ? handleRemove : undefined}
         >
-          <span className="state-icon-default">
+          {onRemove ? (
+            <>
+              {/* Default icon - slides right on hover */}
+              <span className="state-icon-slide group-hover:translate-x-4 group-hover:opacity-0">
+                <StateIcon size={14} strokeWidth={2} />
+              </span>
+              {/* Remove icon - slides in from left on hover */}
+              <span className="state-icon-slide absolute inset-0 -translate-x-4 opacity-0 group-hover:translate-x-0 group-hover:opacity-100">
+                <Bomb size={14} strokeWidth={2} />
+              </span>
+            </>
+          ) : (
             <StateIcon size={14} strokeWidth={2} />
-          </span>
-          {onRemove && (
-            <span className="state-icon-remove">
-              <Bomb size={14} strokeWidth={2} />
-            </span>
           )}
         </div>
-        <div className="session-name">
-          <span className="session-name-text">{displayName}</span>
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <span className="font-mono text-sm text-white/95 font-medium whitespace-nowrap overflow-hidden text-ellipsis text-shadow-md block">
+            {displayName}
+          </span>
         </div>
       </div>
-      <div className="session-event">
+      <div className="flex items-center gap-1.5 pl-6 min-h-[18px]">
         {state === 'idle' && stoppedAt ? (
-          <span className="tool-placeholder">waiting since {formatDateTime(stoppedAt)}</span>
+          <span className="text-xs text-white/30 italic">waiting since {formatDateTime(stoppedAt)}</span>
         ) : state === 'stale' && staleAt ? (
-          <span className="tool-placeholder">inactive since {formatDateTime(staleAt)}</span>
+          <span className="text-xs text-white/30 italic">inactive since {formatDateTime(staleAt)}</span>
         ) : state === 'attention' ? (
-          <span className="tool-placeholder">{permissionTool ?? 'Tool'} needs permission</span>
+          <span className="text-xs text-white/30 italic">{permissionTool ?? 'Tool'} needs permission</span>
         ) : state === 'compacting' ? (
-          <span className="tool-placeholder">compacting context...</span>
+          <span className="text-xs text-white/30 italic">compacting context...</span>
         ) : currentTool ? (
-          <div className="tool-item">
+          <div className="flex items-center gap-2 font-mono text-xs text-white/60 text-shadow-sm animate-fade-in-glass">
             {(() => {
               const ToolIcon = getToolIcon(currentTool.toolName);
-              return <ToolIcon size={12} strokeWidth={2} className="tool-icon" />;
+              return <ToolIcon size={12} strokeWidth={2} className="shrink-0 text-white/50" />;
             })()}
-            <span className="tool-label">
+            <span className="whitespace-nowrap overflow-hidden text-ellipsis italic">
               {currentTool.toolLabel ?? currentTool.toolName}
             </span>
           </div>
         ) : (
-          <span className="tool-placeholder">{placeholderRef.current}</span>
+          <span className="text-xs text-white/30 italic">{placeholderRef.current}</span>
         )}
       </div>
     </div>

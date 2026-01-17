@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { LucideIcon } from 'lucide-react';
 import type { Session } from '../types';
 import { INDICATOR_ICONS, CREATIVE_ICONS } from '../constants';
 
@@ -75,20 +74,35 @@ export function Indicator({ sessions, onClick, onDragStart }: IndicatorProps) {
     };
   }, [shouldCycle, currentIndex]);
 
-  const indicatorClasses = ['indicator', indicatorState].join(' ');
+  // Base classes for the indicator container
+  const indicatorClasses = 'cursor-grab active:cursor-grabbing transition-opacity duration-300';
+
+  // Circle classes based on state
+  const circleClasses = [
+    'glass-indicator',
+    indicatorState === 'attention' ? 'animate-shake animate-pulse-attention' : '',
+    'group-hover:glass-indicator-hover',
+  ].filter(Boolean).join(' ');
+
+  // Icon color classes based on state
+  const iconColorClass = indicatorState === 'attention'
+    ? 'text-white/95'
+    : indicatorState === 'running'
+      ? 'text-white'
+      : 'text-white/50';
 
   // Static icon for idle or attention
   if (!shouldCycle) {
     const Icon = INDICATOR_ICONS[indicatorState];
     return (
       <div
-        className={indicatorClasses}
+        className={`group ${indicatorClasses}`}
         onClick={onClick}
         onMouseDown={onDragStart}
       >
-        <div className="indicator-circle">
+        <div className={circleClasses}>
           <div className="indicator-gloss" />
-          <div className="indicator-icon">
+          <div className={`absolute inset-0 flex items-center justify-center ${iconColorClass}`}>
             <Icon size={16} strokeWidth={2} />
           </div>
         </div>
@@ -102,24 +116,24 @@ export function Indicator({ sessions, onClick, onDragStart }: IndicatorProps) {
 
   return (
     <div
-      className={indicatorClasses}
+      className={`group ${indicatorClasses}`}
       onClick={onClick}
       onMouseDown={onDragStart}
     >
-      <div className="indicator-circle">
+      <div className={circleClasses}>
         <div className="indicator-gloss" />
         {!isTransitioning && (
-          <div className="indicator-icon" key={`current-${currentIndex}`}>
+          <div className={`absolute inset-0 flex items-center justify-center ${iconColorClass}`} key={`current-${currentIndex}`}>
             <CurrentIcon size={16} strokeWidth={2} />
           </div>
         )}
         {isTransitioning && (
           <>
-            <div className="indicator-icon slide-exit" key={`exit-${currentIndex}`}>
+            <div className={`absolute inset-0 flex items-center justify-center animate-slide-exit ${iconColorClass}`} key={`exit-${currentIndex}`}>
               <CurrentIcon size={16} strokeWidth={2} />
             </div>
             {NextIcon && (
-              <div className="indicator-icon slide-enter" key={`enter-${nextIndex}`}>
+              <div className={`absolute inset-0 flex items-center justify-center animate-slide-enter ${iconColorClass}`} key={`enter-${nextIndex}`}>
                 <NextIcon size={16} strokeWidth={2} />
               </div>
             )}

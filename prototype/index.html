@@ -4,7 +4,124 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Aura Prototype</title>
-  <link rel="stylesheet" href="/public/styles.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            mono: ["'Maple Mono NF CN'", 'Monaco', 'monospace'],
+          },
+          animation: {
+            'slide-in': 'slideIn 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+            'slide-out': 'slideOut 0.3s cubic-bezier(0.4, 0, 1, 1) forwards',
+            'fade-in-glass': 'fadeInGlass 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+            'expand-in': 'expandIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+            'collapse-out': 'collapseOut 0.3s cubic-bezier(0.4, 0, 1, 1) forwards',
+            'shake': 'shake 0.15s ease-in-out infinite alternate',
+            'breathe': 'breathe 4s ease-in-out infinite',
+            'pulse-attention': 'pulseAttention 2s ease-in-out infinite',
+            'slide-exit': 'slideOutToLeft 0.4s ease-out forwards',
+            'slide-enter': 'slideInFromRight 0.4s ease-out forwards',
+            'spin': 'spin 1s linear infinite',
+          },
+          keyframes: {
+            slideIn: {
+              from: {
+                opacity: '0',
+                transform: 'translateX(-12px) scale(0.98)',
+                filter: 'blur(2px)',
+              },
+              to: {
+                opacity: '1',
+                transform: 'translateX(0) scale(1)',
+                filter: 'blur(0)',
+              },
+            },
+            slideOut: {
+              to: {
+                opacity: '0',
+                transform: 'translateX(12px) scale(0.98)',
+                filter: 'blur(2px)',
+              },
+            },
+            fadeInGlass: {
+              from: {
+                opacity: '0',
+                transform: 'translateY(6px)',
+                filter: 'blur(2px)',
+              },
+              to: {
+                opacity: '1',
+                transform: 'translateY(0)',
+                filter: 'blur(0)',
+              },
+            },
+            expandIn: {
+              from: {
+                opacity: '0',
+                transform: 'scale(0.9) translateY(-12px)',
+                filter: 'blur(4px)',
+              },
+              to: {
+                opacity: '1',
+                transform: 'scale(1) translateY(0)',
+                filter: 'blur(0)',
+              },
+            },
+            collapseOut: {
+              to: {
+                opacity: '0',
+                transform: 'scale(0.9) translateY(-12px)',
+                filter: 'blur(4px)',
+              },
+            },
+            shake: {
+              '0%': { transform: 'translateX(-1.5px)' },
+              '100%': { transform: 'translateX(1.5px)' },
+            },
+            breathe: {
+              '0%, 100%': { opacity: '0.5' },
+              '50%': { opacity: '0.3' },
+            },
+            pulseAttention: {
+              '0%, 100%': {
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2), 0 0 20px rgba(255, 255, 255, 0.15), inset 0 1px 1px rgba(255, 255, 255, 0.4)',
+              },
+              '50%': {
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.25), 0 0 30px rgba(255, 255, 255, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.5)',
+              },
+            },
+            slideOutToLeft: {
+              from: {
+                transform: 'translateX(0)',
+                opacity: '1',
+              },
+              to: {
+                transform: 'translateX(-100%)',
+                opacity: '0',
+              },
+            },
+            slideInFromRight: {
+              from: {
+                transform: 'translateX(100%)',
+                opacity: '0',
+              },
+              to: {
+                transform: 'translateX(0)',
+                opacity: '1',
+              },
+            },
+            spin: {
+              from: { transform: 'rotate(0deg)' },
+              to: { transform: 'rotate(360deg)' },
+            },
+          },
+        },
+      },
+    }
+  </script>
+  <link rel="stylesheet" href="/src/index.css">
 </head>
 <body>
   <div id="root"></div>

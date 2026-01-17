@@ -179,38 +179,13 @@ export default function App() {
     }
   }, []);
 
-
-  const indicatorContainerStyle = {
-    transform: `translateX(-50%) translate(${indicatorPosition.x}px, ${indicatorPosition.y}px)`,
-    cursor: isIndicatorDragging ? 'grabbing' : undefined,
-  };
-
-  const listContainerStyle: React.CSSProperties = {
-    position: 'fixed',
-    top: 30,
-    left: '50%',
-    transform: `translateX(-50%) translate(${listPosition.x}px, ${listPosition.y}px)`,
-    cursor: isListDragging ? 'grabbing' : undefined,
-    zIndex: 999,
-  };
-
   if (showIconPreview) {
     return (
       <>
         <IconPreview />
         <button
           onClick={() => setShowIconPreview(false)}
-          style={{
-            position: 'fixed',
-            top: 20,
-            right: 20,
-            padding: '8px 16px',
-            background: '#a78bfa',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 8,
-            cursor: 'pointer',
-          }}
+          className="fixed top-5 right-5 px-4 py-2 bg-purple-400 text-white border-none rounded-lg cursor-pointer"
         >
           Back to Prototype
         </button>
@@ -221,13 +196,25 @@ export default function App() {
   return (
     <>
       {/* Indicator with its own position */}
-      <div className="prototype-container" style={indicatorContainerStyle}>
+      <div
+        className="fixed top-[30px] left-1/2 z-[1000] flex flex-col items-center gap-3 w-80"
+        style={{
+          transform: `translateX(-50%) translate(${indicatorPosition.x}px, ${indicatorPosition.y}px)`,
+          cursor: isIndicatorDragging ? 'grabbing' : undefined,
+        }}
+      >
         <Indicator sessions={sessions} onClick={handleToggleView} onDragStart={handleIndicatorMouseDown} />
       </div>
 
       {/* Session list with independent position */}
       {isExpanded && sessions.length > 0 && (
-        <div style={listContainerStyle}>
+        <div
+          className="fixed top-[30px] left-1/2 z-[999]"
+          style={{
+            transform: `translateX(-50%) translate(${listPosition.x}px, ${listPosition.y}px)`,
+            cursor: isListDragging ? 'grabbing' : undefined,
+          }}
+        >
           <SessionList
             sessions={sessions}
             onDragStart={handleListMouseDown}
@@ -238,17 +225,7 @@ export default function App() {
 
       <button
         onClick={() => setShowIconPreview(true)}
-        style={{
-          position: 'fixed',
-          top: 20,
-          right: 20,
-          padding: '8px 16px',
-          background: 'rgba(255,255,255,0.1)',
-          color: '#fff',
-          border: '1px solid rgba(255,255,255,0.2)',
-          borderRadius: 8,
-          cursor: 'pointer',
-        }}
+        className="fixed top-5 right-5 px-4 py-2 bg-white/10 text-white border border-white/20 rounded-lg cursor-pointer"
       >
         Icon Preview
       </button>
