@@ -96,12 +96,15 @@ Running → Idle → Stale (10min timeout), or Running → Attention (permission
 Install the plugin to connect Claude Code sessions to the HUD:
 
 ```bash
-# Build hook handler and add to PATH
-cargo build --release -p aura-claude-code-hook
+# Build and add to PATH
+cargo build --release
 export PATH="/path/to/aura/target/release:$PATH"
 
+# Start daemon
+aura-daemon
+
 # Install plugin
-/plugin install /path/to/aura/plugins/aura
+/plugin install github:fahchen/aura
 ```
 
 The hook gracefully fails if daemon isn't running—Claude Code continues normally.

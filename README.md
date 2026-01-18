@@ -29,11 +29,14 @@ Aura monitors Claude Code as it works, displaying session state and active tools
 # Build
 cargo build --release
 
+# Add to PATH (in your shell config)
+export PATH="/path/to/aura/target/release:$PATH"
+
 # Start daemon
-cargo run -p aura-daemon
+aura-daemon
 
 # Install Claude Code plugin
-/plugin install /path/to/aura/plugins/aura
+/plugin install github:fahchen/aura
 ```
 
 ## Architecture
@@ -92,7 +95,6 @@ cd prototype && bun dev
 
 - [`CLAUDE.md`](./CLAUDE.md) - Developer guide
 - [`docs/design-spec.md`](./docs/design-spec.md) - Visual specifications
-- [`plugins/aura/README.md`](./plugins/aura/README.md) - Plugin setup
 
 ## License
 
