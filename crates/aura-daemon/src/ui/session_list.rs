@@ -4,13 +4,14 @@
 //! - Line 1 (header): State icon (16x16) + session name
 //! - Line 2 (event): Current tool with icon (or state-specific placeholder)
 //!
-//! Uses liquid glass theme with white text on translucent backgrounds.
+//! Uses liquid glass theme with themed text colors on translucent backgrounds.
 
 use super::animation::{calculate_shake_offset, ease_in_out};
-use super::icons::{self, colors};
+use super::icons;
+use super::theme::{ThemeColors, WINDOW_RADIUS};
 use aura_common::{RunningTool, SessionInfo, SessionState, PLACEHOLDER_TEXTS};
 use chrono::{DateTime, Local, Utc};
-use gpui::{div, px, svg, Div, InteractiveElement, ParentElement, Styled};
+use gpui::{div, px, svg, Div, Hsla, InteractiveElement, ParentElement, Styled};
 use std::time::Instant;
 
 /// Session list dimensions
@@ -58,6 +59,7 @@ pub fn render_row_content(
     state_x: f32,
     remove_opacity: f32,
     remove_x: f32,
+    theme: &ThemeColors,
 ) -> Div {
     div()
         .w_full()
@@ -66,9 +68,9 @@ pub fn render_row_content(
         .gap(px(3.0))
         .px(px(14.0))
         .py(px(10.0))
-        .rounded(px(colors::WINDOW_RADIUS))
-        .bg(colors::ROW_BG) // Subtle glass background
-        .hover(|style| style.bg(colors::ROW_HOVER_BG))
+        .rounded(px(WINDOW_RADIUS))
+        .bg(theme.row_bg)
+        .hover(|style| style.bg(theme.row_hover_bg))
         // Session header (Line 1): icon + name
         .child(render_session_header(
             session.state,
@@ -78,9 +80,10 @@ pub fn render_row_content(
             state_x,
             remove_opacity,
             remove_x,
+            theme,
         ))
         // Session event (Line 2): tool or placeholder
-        .child(render_session_event(session, tool_index, fade_progress))
+        .child(render_session_event(session, tool_index, fade_progress, theme))
 }
 
 /// Render the session header (Line 1): state icon + session name
@@ -92,6 +95,7 @@ fn render_session_header(
     state_x: f32,
     remove_opacity: f32,
     remove_x: f32,
+    theme: &ThemeColors,
 ) -> Div {
     div()
         .w_full()
@@ -101,7 +105,7 @@ fn render_session_header(
         .items_center()
         .gap(px(HEADER_GAP))
         // State icon (fixed width, with opacity + shake)
-        .child(render_state_indicator(state, animation_start, state_opacity, state_x, remove_opacity, remove_x))
+        .child(render_state_indicator(state, animation_start, state_opacity, state_x, remove_opacity, remove_x, theme))
         // Session name (with ellipsis truncation)
         .child(
             div()
@@ -111,7 +115,7 @@ fn render_session_header(
                 .font_family("Maple Mono NF CN")
                 .text_size(px(14.0))
                 .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(colors::TEXT_PRIMARY)
+                .text_color(theme.text_primary)
                 .whitespace_nowrap()
                 .text_ellipsis()
                 .child(session_name.to_string()),
@@ -123,6 +127,7 @@ fn render_session_event(
     session: &SessionInfo,
     tool_index: usize,
     fade_progress: f32,
+    theme: &ThemeColors,
 ) -> Div {
     div()
         .w_full()
@@ -131,7 +136,7 @@ fn render_session_event(
         .items_center()
         .pl(px(EVENT_PADDING_LEFT)) // Align under session name
         .h(px(18.0)) // Fixed height to prevent layout jumps
-        .child(render_tool_or_placeholder(session, tool_index, fade_progress))
+        .child(render_tool_or_placeholder(session, tool_index, fade_progress, theme))
 }
 
 /// Format a Unix timestamp as "Jan 17, 14:30"
@@ -179,7 +184,7 @@ fn get_placeholder_text(session: &SessionInfo) -> String {
 }
 
 /// Render placeholder text with AudioLines icon (italic per design spec)
-fn render_placeholder(text: &str) -> Div {
+fn render_placeholder(text: &str, theme: &ThemeColors) -> Div {
     div()
         .w_full() // Fill parent container width
         .h(px(18.0)) // Fixed height for consistent layout
@@ -202,7 +207,7 @@ fn render_placeholder(text: &str) -> Div {
                     svg()
                         .path("icons/audio-lines.svg")
                         .size(px(TOOL_ICON_WIDTH))
-                        .text_color(colors::ICON_TOOL),
+                        .text_color(theme.icon_tool),
                 ),
         )
         // Placeholder text
@@ -214,7 +219,7 @@ fn render_placeholder(text: &str) -> Div {
                 .font_family("Maple Mono NF CN")
                 .text_size(px(12.0))
                 .italic()
-                .text_color(colors::TEXT_SECONDARY)
+                .text_color(theme.text_secondary)
                 .whitespace_nowrap()
                 .text_ellipsis()
                 .child(text.to_string()),
@@ -227,6 +232,7 @@ fn render_tool_or_placeholder(
     session: &SessionInfo,
     tool_index: usize,
     fade_progress: f32,
+    theme: &ThemeColors,
 ) -> Div {
     if session.running_tools.is_empty() {
         // Show state-specific placeholder
@@ -236,16 +242,16 @@ fn render_tool_or_placeholder(
             .min_w_0() // Allow shrinking for text ellipsis
             .h(px(18.0)) // Fixed height to match tool display
             .overflow_hidden()
-            .child(render_placeholder(&placeholder_text));
+            .child(render_placeholder(&placeholder_text, theme));
     }
 
     // Render tools with cross-fade animation
-    render_current_tool(&session.running_tools, tool_index, fade_progress)
+    render_current_tool(&session.running_tools, tool_index, fade_progress, theme)
 }
 
 /// Render current tool with cross-fade animation
 /// Shows one tool at a time, cycling through the list
-fn render_current_tool(tools: &[RunningTool], tool_index: usize, fade_progress: f32) -> Div {
+fn render_current_tool(tools: &[RunningTool], tool_index: usize, fade_progress: f32, theme: &ThemeColors) -> Div {
     // Get current and next tool indices
     let current_idx = tool_index % tools.len();
     let next_idx = (tool_index + 1) % tools.len();
@@ -281,7 +287,7 @@ fn render_current_tool(tools: &[RunningTool], tool_index: usize, fade_progress: 
                 .items_center()
                 .overflow_hidden()
                 .opacity(current_opacity)
-                .child(render_tool_with_icon(current_tool)),
+                .child(render_tool_with_icon(current_tool, theme)),
         )
         // Next tool (fading in, sliding down from above)
         .child(
@@ -295,15 +301,15 @@ fn render_current_tool(tools: &[RunningTool], tool_index: usize, fade_progress: 
                 .items_center()
                 .overflow_hidden()
                 .opacity(next_opacity)
-                .child(render_tool_with_icon(next_tool)),
+                .child(render_tool_with_icon(next_tool, theme)),
         )
 }
 
 /// Icon width for consistent alignment
 const TOOL_ICON_WIDTH: f32 = 12.0;
 
-/// Render a tool with its SVG icon (using liquid glass theme colors)
-pub fn render_tool_with_icon(tool: &RunningTool) -> Div {
+/// Render a tool with its SVG icon (using theme colors)
+pub fn render_tool_with_icon(tool: &RunningTool, theme: &ThemeColors) -> Div {
     let icon_path = icons::tool_icon_asset(&tool.tool_name);
     let display_text = if tool.tool_name.starts_with("mcp__") {
         // Extract server name from mcp__server__function format
@@ -340,7 +346,7 @@ pub fn render_tool_with_icon(tool: &RunningTool) -> Div {
                     svg()
                         .path(icon_path)
                         .size(px(TOOL_ICON_WIDTH))
-                        .text_color(colors::ICON_TOOL),
+                        .text_color(theme.icon_tool),
                 ),
         )
         // Tool label (italic per design spec, with ellipsis)
@@ -352,7 +358,7 @@ pub fn render_tool_with_icon(tool: &RunningTool) -> Div {
                 .font_family("Maple Mono NF CN")
                 .text_size(px(12.0))
                 .italic()
-                .text_color(colors::TEXT_SECONDARY)
+                .text_color(theme.text_secondary)
                 .whitespace_nowrap()
                 .text_ellipsis()
                 .child(display_text),
@@ -370,19 +376,20 @@ pub fn extract_session_name(cwd: &str) -> String {
 
 /// Convert SessionState to color (used by indicator.rs)
 #[allow(dead_code)]
-pub fn state_to_color(state: SessionState) -> gpui::Hsla {
+pub fn state_to_color(state: SessionState) -> Hsla {
+    use super::theme;
     match state {
-        SessionState::Running => colors::GREEN,
-        SessionState::Idle => colors::BLUE,
-        SessionState::Attention => colors::YELLOW,
-        SessionState::Compacting => colors::PURPLE,
-        SessionState::Stale => colors::GRAY,
+        SessionState::Running => theme::GREEN,
+        SessionState::Idle => theme::BLUE,
+        SessionState::Attention => theme::YELLOW,
+        SessionState::Compacting => theme::PURPLE,
+        SessionState::Stale => theme::GRAY,
     }
 }
 
 /// Render state indicator with SVG icon and opacity
 ///
-/// Uses white icon color with varying opacity based on state urgency.
+/// Uses themed icon color with varying opacity based on state urgency.
 /// On hover, swaps to remove (X) icon with slide animation.
 fn render_state_indicator(
     state: SessionState,
@@ -391,6 +398,7 @@ fn render_state_indicator(
     state_x: f32,
     remove_opacity: f32,
     remove_x: f32,
+    theme: &ThemeColors,
 ) -> Div {
     let icon_path = icons::state_icon_path(state);
     let base_opacity = state_to_opacity(state);
@@ -402,19 +410,15 @@ fn render_state_indicator(
         0.0
     };
 
-    // White icon with state-based opacity (dark glass theme)
-    let state_icon_color = gpui::Hsla {
-        h: 0.0,
-        s: 0.0,
-        l: 1.0,
+    // Themed icon with state-based opacity
+    let state_icon_color = Hsla {
         a: base_opacity * state_opacity,
+        ..theme.icon_state
     };
 
-    let remove_icon_color = gpui::Hsla {
-        h: 0.0,
-        s: 0.0,
-        l: 1.0,
+    let remove_icon_color = Hsla {
         a: 0.9 * remove_opacity,
+        ..theme.icon_state
     };
 
     div()

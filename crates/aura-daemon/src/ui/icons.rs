@@ -261,64 +261,64 @@ pub mod colors {
     /// macOS Tahoe window corner radius (16pt for TitleBar windows)
     pub const WINDOW_RADIUS: f32 = 16.0;
 
-    // === Text Colors (WHITE with varying alpha) ===
+    // === Text Colors (solid grays, no opacity) ===
 
-    /// Session name - rgba(255,255,255,0.95)
+    /// Session name - #F2F2F2 (95% brightness)
     pub const TEXT_PRIMARY: Hsla = Hsla {
         h: 0.0,
         s: 0.0,
-        l: 1.0,
-        a: 0.95,
+        l: 0.95,
+        a: 1.0,
     };
 
-    /// Tool text - rgba(255,255,255,0.6)
+    /// Tool text - #999999 (60% brightness)
     pub const TEXT_SECONDARY: Hsla = Hsla {
         h: 0.0,
         s: 0.0,
-        l: 1.0,
-        a: 0.6,
+        l: 0.60,
+        a: 1.0,
     };
 
-    /// Placeholder text - rgba(255,255,255,0.3)
+    /// Placeholder text - #4D4D4D (30% brightness)
     pub const TEXT_MUTED: Hsla = Hsla {
         h: 0.0,
         s: 0.0,
-        l: 1.0,
-        a: 0.3,
+        l: 0.30,
+        a: 1.0,
     };
 
-    /// Header count (compact) - rgba(255,255,255,0.5)
+    /// Header count - #808080 (50% brightness)
     pub const TEXT_HEADER: Hsla = Hsla {
         h: 0.0,
         s: 0.0,
-        l: 1.0,
-        a: 0.5,
+        l: 0.50,
+        a: 1.0,
     };
 
-    // === Icon Colors (WHITE with varying alpha) ===
+    // === Icon Colors (solid grays, no opacity) ===
 
-    /// State icon - rgba(255,255,255,0.7)
+    /// State icon - #B3B3B3 (70% brightness)
     pub const ICON_STATE: Hsla = Hsla {
         h: 0.0,
         s: 0.0,
-        l: 1.0,
-        a: 0.7,
+        l: 0.70,
+        a: 1.0,
     };
 
-    /// Tool icon - rgba(255,255,255,0.5)
+    /// Tool icon - #808080 (50% brightness)
     pub const ICON_TOOL: Hsla = Hsla {
         h: 0.0,
         s: 0.0,
-        l: 1.0,
-        a: 0.5,
+        l: 0.50,
+        a: 1.0,
     };
 
-    /// Default icon (for non-tool elements) - rgba(255,255,255,0.6)
+    /// Default icon - #999999 (60% brightness)
     pub const ICON_DEFAULT: Hsla = Hsla {
         h: 0.0,
         s: 0.0,
-        l: 1.0,
-        a: 0.6,
+        l: 0.60,
+        a: 1.0,
     };
 
     // === Background Colors ===
@@ -404,6 +404,24 @@ pub mod colors {
         s: 0.0,
         l: 1.0,
         a: 0.15,
+    };
+
+    // === Glass Highlight Colors (subtle inset glow simulation) ===
+
+    /// Top highlight line - rgba(255,255,255,0.20) - simulates inset 0 1px glow
+    pub const GLASS_TOP_HIGHLIGHT: Hsla = Hsla {
+        h: 0.0,
+        s: 0.0,
+        l: 1.0,
+        a: 0.20,
+    };
+
+    /// Row top highlight - rgba(255,255,255,0.10) - subtle row depth
+    pub const ROW_HIGHLIGHT: Hsla = Hsla {
+        h: 0.0,
+        s: 0.0,
+        l: 1.0,
+        a: 0.10,
     };
 
     // === Legacy state colors (keep for backwards compatibility) ===

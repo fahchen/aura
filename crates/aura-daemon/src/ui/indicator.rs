@@ -6,14 +6,15 @@
 //! - No sessions: panda (dim, static)
 //!
 //! Visual design:
-//! - Liquid glass: translucent white background with border
+//! - Liquid glass: translucent background with border
 //! - Gloss overlay: top half for depth
-//! - Icon: Lucide SVG in white
+//! - Icon: themed color (white for dark, black for light)
 
 use super::animation::{calculate_shake_offset, ease_out};
 use super::icons;
+use super::theme::ThemeColors;
 use aura_common::{SessionInfo, SessionState};
-use gpui::{div, px, svg, Div, ParentElement, Styled};
+use gpui::{div, prelude::FluentBuilder, px, svg, Div, Hsla, ParentElement, Styled};
 use std::time::Instant;
 
 /// Indicator dimensions (matching React prototype: 36x36px rounded square)
@@ -92,7 +93,7 @@ fn get_running_icon_state(animation_start: Instant) -> (&'static str, &'static s
 /// When `is_hovered` is true, applies enhanced visual effect:
 /// - Increased background opacity
 /// - Brighter gloss highlight
-pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bool) -> Div {
+pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bool, theme: &ThemeColors) -> Div {
     let state = determine_state(sessions);
 
     // Get running icon state (may include transition)
@@ -103,19 +104,19 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bo
     };
 
     // Select SVG icon path and opacity values based on state
-    // Icon colors: white with varying alpha (Attention 0.95, Running 1.0, NoSessions 0.5)
+    // Icon colors: theme-based with varying alpha (Attention 0.95, Running 1.0, NoSessions 0.5)
     // Background alpha: averaged from CSS gradient (0.15/0.05/0.1 -> ~0.10)
     // On hover: enhance background +0.05, gloss +0.10 for visual feedback
     let hover_bg_boost = if is_hovered { 0.05 } else { 0.0 };
     let hover_gloss_boost = if is_hovered { 0.10 } else { 0.0 };
 
-    let (icon_path, circle_bg_alpha, icon_alpha, gloss_alpha) = match state {
-        IndicatorState::Attention => (ICON_ATTENTION, 0.12 + hover_bg_boost, 0.95, 0.06 + hover_gloss_boost),
+    let (icon_path, bg_alpha_boost, icon_alpha, gloss_alpha_boost) = match state {
+        IndicatorState::Attention => (ICON_ATTENTION, 0.02 + hover_bg_boost, 0.95, 0.01 + hover_gloss_boost),
         IndicatorState::Running => {
             let (current, _, _) = running_state.unwrap();
-            (current, 0.10 + hover_bg_boost, 1.0, 0.05 + hover_gloss_boost)
+            (current, hover_bg_boost, 1.0, hover_gloss_boost)
         }
-        IndicatorState::NoSessions => (ICON_NO_SESSIONS, 0.08 + hover_bg_boost, 0.5, 0.03 + hover_gloss_boost),
+        IndicatorState::NoSessions => (ICON_NO_SESSIONS, -0.02 + hover_bg_boost, 0.5, -0.02 + hover_gloss_boost),
     };
 
     // Calculate shake offset for attention state
@@ -125,33 +126,21 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bo
         0.0
     };
 
-    // Liquid glass background (translucent white)
-    let circle_bg_color = gpui::Hsla {
-        h: 0.0,
-        s: 0.0,
-        l: 1.0, // White
-        a: circle_bg_alpha,
+    // Use theme colors with state-based adjustments
+    let circle_bg_color = Hsla {
+        a: (theme.indicator_bg.a + bg_alpha_boost).clamp(0.0, 1.0),
+        ..theme.indicator_bg
     };
-    // Border color (white at 0.2 alpha per design spec)
-    let border_color = gpui::Hsla {
-        h: 0.0,
-        s: 0.0,
-        l: 1.0, // White
-        a: 0.2,
+    let border_color = theme.indicator_border;
+    // Icon color from theme with state-based alpha
+    let icon_color = Hsla {
+        a: theme.indicator_icon.a * icon_alpha,
+        ..theme.indicator_icon
     };
-    // White icon (per design spec - white with state-based alpha)
-    let icon_color = gpui::Hsla {
-        h: 0.0,
-        s: 0.0,
-        l: 1.0, // White
-        a: icon_alpha,
-    };
-    // Subtle white gloss for depth
-    let gloss_color = gpui::Hsla {
-        h: 0.0,
-        s: 0.0,
-        l: 1.0, // White
-        a: gloss_alpha,
+    // Gloss color from theme with state adjustments
+    let gloss_color = Hsla {
+        a: (theme.gloss.a + gloss_alpha_boost).clamp(0.0, 1.0),
+        ..theme.gloss
     };
 
     // Rounded square indicator (36x36px with 12px border-radius per prototype)
@@ -162,6 +151,7 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bo
         .bg(circle_bg_color)
         .border_1()
         .border_color(border_color)
+        .when(theme.use_shadow, |this| this.shadow_md())
         .relative()
         .overflow_hidden()
         // Gloss highlight (top half) - use explicit size, not w_full
@@ -195,8 +185,8 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bo
                             let current_offset = (1.0 - eased) * ICON_FONT_SIZE;
 
                             {
-                                let prev_alpha = icon_alpha * (1.0 - eased);
-                                let curr_alpha = icon_alpha * eased;
+                                let prev_alpha = icon_color.a * (1.0 - eased);
+                                let curr_alpha = icon_color.a * eased;
 
                                 div()
                                     .flex()
@@ -222,11 +212,9 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bo
                                                 svg()
                                                     .path(prev_icon)
                                                     .size(px(ICON_FONT_SIZE))
-                                                    .text_color(gpui::Hsla {
-                                                        h: 0.0,
-                                                        s: 0.0,
-                                                        l: 1.0,
+                                                    .text_color(Hsla {
                                                         a: prev_alpha,
+                                                        ..icon_color
                                                     }),
                                             ),
                                     )
@@ -246,11 +234,9 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bo
                                                 svg()
                                                     .path(current_icon)
                                                     .size(px(ICON_FONT_SIZE))
-                                                    .text_color(gpui::Hsla {
-                                                        h: 0.0,
-                                                        s: 0.0,
-                                                        l: 1.0,
+                                                    .text_color(Hsla {
                                                         a: curr_alpha,
+                                                        ..icon_color
                                                     }),
                                             ),
                                     )

@@ -1,0 +1,52 @@
+//! Liquid glass effect helpers for gpui
+//!
+//! Since gpui doesn't support CSS gradients or backdrop-filter, we add
+//! subtle highlight/shadow lines to simulate the glass inset effect:
+//!
+//! - **Top highlight** - Thin bright line at top (simulates inset 0 1px glow)
+//!
+//! The main background colors are applied by the parent elements.
+//! These helpers just add the subtle glass "shine" details.
+
+use super::theme::ThemeColors;
+use gpui::{div, px, Div, Styled};
+
+/// Render glass highlight for container (just top edge glow)
+///
+/// Simulates the CSS inset box-shadow:
+/// ```css
+/// box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.3);
+/// ```
+#[allow(dead_code)]
+pub fn render_container_highlight(border_radius: f32, theme: &ThemeColors) -> Div {
+    // Top highlight line (simulates inset 0 1px glow)
+    div()
+        .absolute()
+        .top_0()
+        .left(px(border_radius / 2.0)) // Inset from rounded corners
+        .right(px(border_radius / 2.0))
+        .h(px(1.0))
+        .bg(theme.glass_top_highlight)
+}
+
+/// Render glass highlight for content area (subtle top edge)
+#[allow(dead_code)]
+pub fn render_content_highlight(_border_radius: f32, _theme: &ThemeColors) -> Div {
+    // Content area uses border-top highlight instead of overlay
+    // This is handled in mod.rs via CONTENT_HIGHLIGHT border color
+    div() // Empty placeholder - highlight done via border
+}
+
+/// Render glass highlight for session row (subtle top-left glow)
+///
+/// Uses a very subtle highlight on the top edge to give depth
+#[allow(dead_code)]
+pub fn render_row_highlight(border_radius: f32, theme: &ThemeColors) -> Div {
+    div()
+        .absolute()
+        .top_0()
+        .left(px(border_radius / 2.0))
+        .right(px(border_radius / 2.0))
+        .h(px(1.0))
+        .bg(theme.row_highlight)
+}

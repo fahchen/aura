@@ -7,12 +7,15 @@
 //! - session_list.rs: Expanded session row rendering
 //! - animation.rs: Tool cycling, marquee, and shake animations
 //! - icons.rs: Icon paths and colors
+//! - theme.rs: Theme system with Dark, Light, and System modes
 
 mod animation;
 pub mod assets;
+mod glass;
 pub mod icons;
 pub mod indicator;
 pub mod session_list;
+pub mod theme;
 
 #[cfg(test)]
 mod visual_tests;
@@ -48,7 +51,7 @@ use std::time::Instant;
 
 
 // Define application actions
-actions!(aura, [Quit]);
+actions!(aura, [Quit, SetThemeSystem, SetThemeLiquidDark, SetThemeLiquidLight, SetThemeSolidDark, SetThemeSolidLight]);
 
 /// Gap between indicator and session list windows
 const WINDOW_GAP: f32 = 4.0;
@@ -72,6 +75,10 @@ struct SharedHudState {
     session_list_origin: Point<Pixels>,
     /// Indicator window handle (for getting current position)
     indicator_window: Option<WindowHandle<IndicatorView>>,
+    /// Theme style preference (System, LiquidDark, LiquidLight, SolidDark, SolidLight)
+    theme_style: theme::ThemeStyle,
+    /// Whether the system is currently in dark mode (detected from OS)
+    system_is_dark: bool,
 }
 
 impl SharedHudState {
@@ -80,6 +87,17 @@ impl SharedHudState {
         if let Ok(registry) = self.registry.lock() {
             self.sessions = registry.get_all();
         }
+    }
+
+    /// Get the current resolved theme colors
+    fn theme_colors(&self) -> theme::ThemeColors {
+        let resolved = self.theme_style.resolve(self.system_is_dark);
+        theme::ThemeColors::for_style(resolved)
+    }
+
+    /// Update system appearance from window
+    fn update_system_appearance(&mut self, appearance: gpui::WindowAppearance) {
+        self.system_is_dark = theme::is_system_dark(appearance);
     }
 }
 
@@ -97,14 +115,17 @@ impl Render for IndicatorView {
         // Request continuous animation frames
         window.request_animation_frame();
 
-        // Refresh sessions from registry on each frame
+        // Update system appearance and refresh sessions from registry on each frame
+        let appearance = window.appearance();
         self.state.update(cx, |state, _cx| {
+            state.update_system_appearance(appearance);
             state.refresh_from_registry();
         });
 
         let hud_state = self.state.read(cx);
         let sessions = &hud_state.sessions;
         let animation_start = hud_state.animation_start;
+        let theme_colors = hud_state.theme_colors();
         let sessions_for_render: Vec<_> = sessions.iter().take(MAX_SESSIONS).cloned().collect();
 
         let is_hovered = self.is_hovered;
@@ -163,7 +184,7 @@ impl Render for IndicatorView {
                     }
                 })
             })
-            .child(indicator::render(&sessions_for_render, animation_start, is_hovered))
+            .child(indicator::render(&sessions_for_render, animation_start, is_hovered, &theme_colors))
     }
 }
 
@@ -191,6 +212,7 @@ impl SessionListView {
         tool_index: usize,
         fade_progress: f32,
         animation_start: Instant,
+        theme_colors: &theme::ThemeColors,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
         let session_id = session.session_id.clone();
@@ -261,6 +283,7 @@ impl SessionListView {
                 state_x,
                 remove_opacity,
                 remove_x,
+                theme_colors,
             ))
             // Remove button overlay - positioned over the state icon area
             // Only clickable when remove icon is visible (hover state)
@@ -294,6 +317,7 @@ impl SessionListView {
         tool_index: usize,
         fade_progress: f32,
         animation_start: Instant,
+        theme_colors: &theme::ThemeColors,
     ) -> gpui::Div {
         let _session_id = session.session_id.clone();
         let session_name = session
@@ -326,6 +350,7 @@ impl SessionListView {
                 0.0,   // No x offset
                 0.0,   // Remove icon hidden
                 -16.0, // Remove icon off-screen
+                theme_colors,
             ))
     }
 }
@@ -334,6 +359,12 @@ impl Render for SessionListView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Request continuous animation frames
         window.request_animation_frame();
+
+        // Update system appearance
+        let appearance = window.appearance();
+        self.state.update(cx, |state, _cx| {
+            state.update_system_appearance(appearance);
+        });
 
         // Check visibility - if not visible, close the window entirely
         let is_visible = self.state.read(cx).session_list_visible;
@@ -352,6 +383,7 @@ impl Render for SessionListView {
         let hud_state = self.state.read(cx);
         let sessions = &hud_state.sessions;
         let animation_start = hud_state.animation_start;
+        let theme_colors = hud_state.theme_colors();
 
         // Resize window if session count changed
         // Include removing sessions in count to prevent height jump during exit animation
@@ -423,7 +455,7 @@ impl Render for SessionListView {
         let session_rows: Vec<_> = sessions_for_render
             .iter()
             .map(|session| {
-                self.render_session_row(session, tool_index, fade_progress, animation_start, cx)
+                self.render_session_row(session, tool_index, fade_progress, animation_start, &theme_colors, cx)
             })
             .collect();
 
@@ -432,7 +464,7 @@ impl Render for SessionListView {
             .removing
             .iter()
             .map(|(_, (session, removed_at))| {
-                self.render_removing_row(session, *removed_at, tool_index, fade_progress, animation_start)
+                self.render_removing_row(session, *removed_at, tool_index, fade_progress, animation_start, &theme_colors)
             })
             .collect();
 
@@ -440,30 +472,24 @@ impl Render for SessionListView {
         self.appeared_at.retain(|id, _| current_ids.contains(id));
         self.icon_hover_at.retain(|id, _| current_ids.contains(id));
 
-        // Session list container with 2-layer structure
-        // Note: gpui renders children in order, so later children appear on top
+        // Session list container with liquid glass effect
         div()
             .id("session-list-container")
             .size_full()
             .relative()
-            .rounded(px(icons::colors::WINDOW_RADIUS))
+            .rounded(px(theme::WINDOW_RADIUS))
             .overflow_hidden()
-            // Layer 1: Background (absolute, glass bg with border)
-            .child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .bg(icons::colors::CONTAINER_BG)
-                    .border_1()
-                    .border_color(icons::colors::BORDER)
-                    .rounded(px(icons::colors::WINDOW_RADIUS)),
-            )
-            // Layer 2: Header + Content (relative, same width as background)
+            .bg(theme_colors.container_bg)
+            .border_1()
+            .border_color(theme_colors.border)
+            .when(theme_colors.use_shadow, |this| this.shadow_md())
+            // Top highlight for glass effect
+            .child(glass::render_container_highlight(theme::WINDOW_RADIUS, &theme_colors))
+            // Header + Content
             .child(
                 div()
                     .relative()
                     .size_full()
-                    .rounded(px(icons::colors::WINDOW_RADIUS))
                     .flex()
                     .flex_col()
                     // Header: draggable "N sessions" text at top
@@ -485,22 +511,22 @@ impl Render for SessionListView {
                             .font_family("Maple Mono NF CN")
                             .text_size(px(11.0))
                             .font_weight(gpui::FontWeight::NORMAL)
-                            .text_color(icons::colors::TEXT_HEADER)
+                            .text_color(theme_colors.text_header)
                             .child(format!(
                                 "{} session{}",
                                 session_count,
                                 if session_count == 1 { "" } else { "s" }
                             )),
                     )
-                    // Content: session rows below header (full width)
+                    // Content: session rows below header
                     .child(
                         div()
                             .p(px(10.0))
                             .flex_1()
-                            .rounded(px(icons::colors::WINDOW_RADIUS))
-                            .bg(icons::colors::CONTENT_BG) // 0.07 alpha
-                            .border_t_1() // Top border only
-                            .border_color(icons::colors::CONTENT_HIGHLIGHT) // Highlight effect
+                            .rounded(px(theme::WINDOW_RADIUS))
+                            .bg(theme_colors.content_bg)
+                            .border_t_1()
+                            .border_color(theme_colors.content_highlight)
                             .flex()
                             .flex_col()
                             .gap(px(ROW_GAP))
@@ -579,10 +605,25 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>) {
             cx.quit();
         });
 
-        // Set up application menu
+        // Set up application menu with theme submenu
         app.set_menus(vec![Menu {
             name: "Aura".into(),
-            items: vec![MenuItem::action("Quit", Quit)],
+            items: vec![
+                MenuItem::submenu(Menu {
+                    name: "Theme".into(),
+                    items: vec![
+                        MenuItem::action("System", SetThemeSystem),
+                        MenuItem::separator(),
+                        MenuItem::action("Liquid Dark", SetThemeLiquidDark),
+                        MenuItem::action("Liquid Light", SetThemeLiquidLight),
+                        MenuItem::separator(),
+                        MenuItem::action("Solid Dark", SetThemeSolidDark),
+                        MenuItem::action("Solid Light", SetThemeSolidLight),
+                    ],
+                }),
+                MenuItem::separator(),
+                MenuItem::action("Quit", Quit),
+            ],
         }]);
 
         // Activate app to show menu bar
@@ -613,6 +654,17 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>) {
         // Calculate session list origin (below indicator)
         let session_list_origin = point(window_x, window_y + px(COLLAPSED_HEIGHT + WINDOW_GAP));
 
+        // Detect initial system appearance
+        let initial_system_is_dark = app
+            .displays()
+            .first()
+            .map(|_| {
+                // Default to dark on macOS since we can't query appearance without a window
+                // The actual appearance will be detected when windows are created
+                true
+            })
+            .unwrap_or(true);
+
         // Create shared state between both windows
         let shared_state = app.new(|_cx| SharedHudState {
             sessions: initial_sessions,
@@ -623,6 +675,44 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>) {
             session_list_window: None,
             session_list_origin,
             indicator_window: None, // Will be set after window creation
+            theme_style: theme::ThemeStyle::System,
+            system_is_dark: initial_system_is_dark,
+        });
+
+        // Register theme action handlers
+        let state_for_system = shared_state.clone();
+        app.on_action(move |_: &SetThemeSystem, cx: &mut App| {
+            state_for_system.update(cx, |state, _cx| {
+                state.theme_style = theme::ThemeStyle::System;
+            });
+        });
+
+        let state_for_liquid_dark = shared_state.clone();
+        app.on_action(move |_: &SetThemeLiquidDark, cx: &mut App| {
+            state_for_liquid_dark.update(cx, |state, _cx| {
+                state.theme_style = theme::ThemeStyle::LiquidDark;
+            });
+        });
+
+        let state_for_liquid_light = shared_state.clone();
+        app.on_action(move |_: &SetThemeLiquidLight, cx: &mut App| {
+            state_for_liquid_light.update(cx, |state, _cx| {
+                state.theme_style = theme::ThemeStyle::LiquidLight;
+            });
+        });
+
+        let state_for_solid_dark = shared_state.clone();
+        app.on_action(move |_: &SetThemeSolidDark, cx: &mut App| {
+            state_for_solid_dark.update(cx, |state, _cx| {
+                state.theme_style = theme::ThemeStyle::SolidDark;
+            });
+        });
+
+        let state_for_solid_light = shared_state.clone();
+        app.on_action(move |_: &SetThemeSolidLight, cx: &mut App| {
+            state_for_solid_light.update(cx, |state, _cx| {
+                state.theme_style = theme::ThemeStyle::SolidLight;
+            });
         });
 
         // Create indicator window (always visible, 36x36)
