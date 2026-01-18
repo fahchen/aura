@@ -103,8 +103,8 @@ export PATH="/path/to/aura/target/release:$PATH"
 # Start daemon
 aura-daemon
 
-# Install plugin
-/plugin install github:fahchen/aura
+# Install plugin (local development)
+/plugin install /path/to/aura/plugins/claude-code
 ```
 
 The hook gracefully fails if daemon isn't running—Claude Code continues normally.

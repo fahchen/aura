@@ -35,8 +35,13 @@ export PATH="/path/to/aura/target/release:$PATH"
 # Start daemon
 aura-daemon
 
-# Install Claude Code plugin
-/plugin install github:fahchen/aura
+# Install Claude Code plugin (in Claude Code)
+/plugin install github:fahchen/aura/plugins/claude-code
+```
+
+For local development:
+```bash
+/plugin install /path/to/aura/plugins/claude-code
 ```
 
 ## Architecture
