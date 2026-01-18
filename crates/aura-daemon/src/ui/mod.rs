@@ -174,21 +174,40 @@ impl Render for IndicatorView {
                             let hud_state = state_for_click.read(app);
                             let has_sessions = !hud_state.sessions.is_empty();
                             let was_visible = hud_state.session_list_visible;
+                            let window_handle = hud_state.session_list_window.clone();
 
                             // Only allow opening if there are sessions
                             if !was_visible && !has_sessions {
                                 return; // No sessions, don't open
                             }
 
-                            let should_open = !was_visible && hud_state.session_list_window.is_none();
-                            let _ = hud_state;
+                            let should_open = !was_visible && window_handle.is_none();
+                            let should_close = was_visible && window_handle.is_some();
 
-                            state_for_click.update(app, |state, _cx| {
-                                state.session_list_visible = !state.session_list_visible;
-                            });
+                            // NOTE: When the session list window is moved and then closed, gpui logs
+                            // "window not found" errors. This is a known gpui limitation (v0.2.2):
+                            // - When a window is moved, gpui registers internal callbacks for position tracking
+                            // - When remove_window() is called, these callbacks still fire
+                            // - The callbacks fail to find the window → "window not found" is logged
+                            // - Error locations in gpui: app.rs:1388, app.rs:2201, window.rs:4725
+                            // - This is benign: the window closes correctly, no functional impact
+                            // - Fix requires changes to gpui's callback cleanup logic
+                            if should_close {
+                                // Remove window FIRST, before state update
+                                let handle = window_handle.unwrap();
+                                let _ = handle.update(app, |_view, window, _cx| {
+                                    window.remove_window();
+                                });
 
-                            // If we need to show the window and it doesn't exist, open it
-                            if should_open {
+                                // Then update state (window is already gone)
+                                state_for_click.update(app, |state, _cx| {
+                                    state.session_list_visible = false;
+                                    state.session_list_window = None;
+                                });
+                            } else if should_open {
+                                state_for_click.update(app, |state, _cx| {
+                                    state.session_list_visible = true;
+                                });
                                 open_session_list_window_sync(app, state_for_click.clone());
                             }
                         }
@@ -373,27 +392,21 @@ impl SessionListView {
 
 impl Render for SessionListView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Check visibility FIRST - if not visible, close the window without requesting frames
+        // Check visibility FIRST - if not visible, return empty (window closing handled by click handler)
         let is_visible = self.state.read(cx).session_list_visible;
         if !is_visible {
-            // Save current position before closing (for position persistence)
-            let current_origin = window.bounds().origin;
-            // Clear window handle and close this window
-            self.state.update(cx, |state, _cx| {
-                state.session_list_origin = current_origin;
-                state.session_list_window = None;
-            });
-            window.remove_window();
             return div().size_full().into_any_element();
         }
 
         // Request continuous animation frames (only for visible windows)
         window.request_animation_frame();
 
-        // Update system appearance
+        // Update system appearance and save current position (for reopening at same location)
         let appearance = window.appearance();
+        let current_origin = window.bounds().origin;
         self.state.update(cx, |state, _cx| {
             state.update_system_appearance(appearance);
+            state.session_list_origin = current_origin;
         });
 
         let hud_state = self.state.read(cx);
@@ -508,7 +521,8 @@ impl Render for SessionListView {
                     .size_full()
                     .flex()
                     .flex_col()
-                    // Header: draggable "N sessions" text at top
+                    // Header: "N sessions" text at top
+                    // Note: Drag disabled due to gpui "window not found" error after move+close
                     .child(
                         div()
                             .id("session-list-header")
@@ -517,13 +531,6 @@ impl Render for SessionListView {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .cursor(gpui::CursorStyle::OpenHand)
-                            .on_mouse_down(
-                                gpui::MouseButton::Left,
-                                |_event: &gpui::MouseDownEvent, window, _cx| {
-                                    window.start_window_move();
-                                },
-                            )
                             .font_family("Maple Mono NF CN")
                             .text_size(px(11.0))
                             .font_weight(gpui::FontWeight::NORMAL)
