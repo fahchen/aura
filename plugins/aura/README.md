@@ -1,6 +1,6 @@
 # Aura Plugin for Claude Code
 
-Real-time situational awareness HUD for AI code agent sessions.
+Real-time situational awareness HUD for Claude Code sessions.
 
 ## Features
 

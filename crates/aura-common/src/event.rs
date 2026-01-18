@@ -1,8 +1,7 @@
-//! Agent-agnostic event types
+//! Event types for AI code agent integration
 //!
-//! These events are emitted by adapters (Claude Code, PTY wrapper, etc.)
-//! and consumed by the Aura daemon. The daemon doesn't know about
-//! agent-specific details.
+//! Currently only Claude Code is supported. The architecture is designed
+//! to support additional agents in future versions.
 
 use serde::{Deserialize, Serialize};
 
@@ -17,10 +16,10 @@ pub enum AgentType {
     Custom(String),
 }
 
-/// Agent-agnostic event
+/// Event from an AI code agent
 ///
-/// Adapters convert agent-specific events (e.g., Claude Code hooks)
-/// into these generic events.
+/// Currently only Claude Code is supported. The architecture is designed
+/// to support additional agents in future versions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {

@@ -4,14 +4,14 @@ A floating HUD for real-time AI coding session awareness.
 
 ## What is Aura?
 
-Aura monitors Claude Code and other AI agents as they work, displaying session state and active tools without taking up screen space. Built with Rust/gpui for native macOS performance.
+Aura monitors Claude Code as it works, displaying session state and active tools without taking up screen space. Built with Rust/gpui for native macOS performance.
 
 **Key features:**
 - Real-time tool visibility (Read, Write, Grep, Bash, etc.)
 - State indicators: Running → Idle → Attention → Waiting → Compacting → Stale
 - Multi-session tracking with minimal 36×36 collapsed indicator
 - Glassmorphism design with liquid glass aesthetic
-- Agent-agnostic architecture (Claude Code, Codex, custom agents)
+- Currently supports Claude Code (other agents planned for future versions)
 
 ## Screenshots
 

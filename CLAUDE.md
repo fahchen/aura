@@ -62,7 +62,7 @@ aura-claude-code-hook  # Receives Claude Code hook JSON → sends IPC to daemon
 
 ```
 Claude Code hook (stdin JSON) → aura-claude-code-hook parses
-    → converts to AgentEvent (agent-agnostic)
+    → converts to AgentEvent
     → IpcMessage over Unix socket
     → daemon server receives
     → SessionRegistry::process_event() updates state
@@ -74,7 +74,7 @@ Claude Code hook (stdin JSON) → aura-claude-code-hook parses
 
 | File | Purpose |
 |------|---------|
-| `aura-common/src/event.rs` | Generic `AgentEvent` enum (8 variants) |
+| `aura-common/src/event.rs` | `AgentEvent` enum (8 variants) |
 | `aura-common/src/adapters/claude_code.rs` | Hook parsing + tool label extraction |
 | `aura-daemon/src/registry.rs` | Session state machine, tool tracking |
 | `aura-daemon/src/server.rs` | tokio IPC server |

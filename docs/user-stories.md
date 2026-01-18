@@ -3,13 +3,13 @@
 **Feature Branch**: `main`
 **Created**: 2025-01-17
 **Status**: Implemented (React Prototype)
-**Input**: Real-time situational awareness HUD for AI code agents
+**Input**: Real-time situational awareness HUD for Claude Code sessions
 
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Monitor Active Sessions (Priority: P1)
 
-As a developer using multiple AI coding agents, I want to see at-a-glance status of all active sessions so I know which ones need attention without switching contexts.
+As a developer using multiple Claude Code sessions, I want to see at-a-glance status of all active sessions so I know which ones need attention without switching contexts.
 
 **Why this priority**: Core value proposition - without visibility into session states, the HUD provides no value.
 

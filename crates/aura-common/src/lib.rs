@@ -1,11 +1,13 @@
 //! Shared types for Aura HUD
 //!
-//! This crate contains agent-agnostic types:
-//! - AgentEvent: Generic events from any code agent
+//! Currently supports Claude Code. The architecture is designed to support
+//! additional agents in future versions.
+//!
+//! - AgentEvent: Events from code agents
 //! - SessionState: Session state machine
 //! - IPC protocol
 //!
-//! Agent-specific adapters are in the `adapters` module.
+//! The Claude Code adapter is in the `adapters` module.
 
 mod event;
 mod ipc;
