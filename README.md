@@ -23,7 +23,20 @@ Aura monitors Claude Code as it works, displaying session state and active tools
 |------------|-------------|
 | ![Solid Dark](docs/screenshots/theme-solid-dark.png) | ![Solid Light](docs/screenshots/theme-solid-light.png) |
 
-## Quick Start
+## Session States
+
+| State | Icon | Description |
+|-------|------|-------------|
+| Running | 📹 cctv | Session actively processing |
+| Idle | 💬 message-square-code | Waiting for user input |
+| Attention | 🔔 bell-ring | Needs permission or action (shakes) |
+| Waiting | 🌀 fan | Waiting for user input (spins) |
+| Compacting | 🍪 cookie | Compacting context |
+| Stale | 👻 ghost | No activity for 10 minutes |
+
+Sessions automatically transition to **Stale** after 10 minutes of inactivity.
+
+## Installation
 
 ```bash
 # Build
@@ -39,8 +52,19 @@ aura-daemon
 /plugin install github:fahchen/aura/plugins/claude-code
 ```
 
-For local development:
+---
+
+## Development
+
 ```bash
+cargo test --workspace           # Run tests
+cargo build -p aura-daemon       # Build daemon only
+./scripts/bundle-macos.sh        # Create .app bundle
+
+# Prototype (React reference)
+cd prototype && bun dev
+
+# Local plugin install
 /plugin install /path/to/aura/plugins/claude-code
 ```
 
@@ -56,16 +80,7 @@ aura-claude-code-hook  # Hook handler for Claude Code
 
 **Event flow:** Claude Code hook → IPC message → daemon → SessionRegistry → gpui render
 
-## Usage
-
-### Running the Daemon
-
-```bash
-cargo run -p aura-daemon        # Default
-cargo run -p aura-daemon -- -v  # Verbose logging
-```
-
-### Testing with IPC
+## Testing with IPC
 
 ```bash
 SOCK="${XDG_RUNTIME_DIR:-/tmp}/aura.sock"
@@ -84,17 +99,6 @@ echo '{"msg":"event","type":"tool_started","session_id":"test","tool_id":"t1","t
 | `needs_attention` | Attention |
 | `waiting_for_input` | Waiting |
 | `compacting` | Compacting |
-
-## Development
-
-```bash
-cargo test --workspace           # Run tests
-cargo build -p aura-daemon       # Build daemon only
-./scripts/bundle-macos.sh        # Create .app bundle
-
-# Prototype (React reference)
-cd prototype && bun dev
-```
 
 ## Documentation
 
