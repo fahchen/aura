@@ -5,6 +5,7 @@ import { Indicator } from './components/Indicator';
 import { SessionList } from './components/SessionList';
 import { Controls } from './components/Controls';
 import { IconPreview } from './IconPreview';
+import { ThemeStyle, getTheme, applyTheme } from './theme';
 
 // Initial setup events
 const SETUP_EVENTS = [
@@ -70,8 +71,27 @@ export default function App() {
   const [bgImage, setBgImage] = useState<string | null>(null);
   const [simulationRunning, setSimulationRunning] = useState(false);
   const [showIconPreview, setShowIconPreview] = useState(false);
+  const [themeStyle, setThemeStyle] = useState<ThemeStyle>('liquidDark');
   const simulationStep = useRef(0);
   const prevSessionCount = useRef(0);
+
+  // Apply theme when style changes
+  useEffect(() => {
+    const systemIsDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const theme = getTheme(themeStyle, systemIsDark);
+    applyTheme(theme);
+
+    // Listen for system theme changes
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (e: MediaQueryListEvent) => {
+      if (themeStyle === 'system') {
+        const newTheme = getTheme('system', e.matches);
+        applyTheme(newTheme);
+      }
+    };
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, [themeStyle]);
   // Separate drag states for indicator and session list
   const {
     position: indicatorPosition,
@@ -179,6 +199,10 @@ export default function App() {
     }
   }, []);
 
+  const handleSetTheme = useCallback((theme: ThemeStyle) => {
+    setThemeStyle(theme);
+  }, []);
+
   if (showIconPreview) {
     return (
       <>
@@ -203,7 +227,7 @@ export default function App() {
           cursor: isIndicatorDragging ? 'grabbing' : undefined,
         }}
       >
-        <Indicator sessions={sessions} onClick={handleToggleView} onDragStart={handleIndicatorMouseDown} />
+        <Indicator sessions={sessions} onClick={handleToggleView} onDragStart={handleIndicatorMouseDown} useShadow={themeStyle === 'solidDark' || themeStyle === 'solidLight'} />
       </div>
 
       {/* Session list with independent position */}
@@ -219,6 +243,7 @@ export default function App() {
             sessions={sessions}
             onDragStart={handleListMouseDown}
             onRemoveSession={removeSession}
+            useShadow={themeStyle === 'solidDark' || themeStyle === 'solidLight'}
           />
         </div>
       )}
@@ -236,7 +261,9 @@ export default function App() {
         onStopSimulation={handleStopSimulation}
         onAddSession={handleAddSession}
         onSetBackground={handleSetBackground}
+        onSetTheme={handleSetTheme}
         simulationRunning={simulationRunning}
+        currentTheme={themeStyle}
       />
     </>
   );

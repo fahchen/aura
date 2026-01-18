@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import type { ThemeStyle } from '../theme';
 
 interface ControlsProps {
   onToggleView: () => void;
@@ -6,8 +7,18 @@ interface ControlsProps {
   onStopSimulation: () => void;
   onAddSession: (cwd: string) => void;
   onSetBackground: (bg: string) => void;
+  onSetTheme: (theme: ThemeStyle) => void;
   simulationRunning: boolean;
+  currentTheme: ThemeStyle;
 }
+
+const THEME_BUTTONS: { id: ThemeStyle; label: string }[] = [
+  { id: 'system', label: 'System' },
+  { id: 'liquidDark', label: 'Liquid Dark' },
+  { id: 'liquidLight', label: 'Liquid Light' },
+  { id: 'solidDark', label: 'Solid Dark' },
+  { id: 'solidLight', label: 'Solid Light' },
+];
 
 export function Controls({
   onToggleView,
@@ -15,7 +26,9 @@ export function Controls({
   onStopSimulation,
   onAddSession,
   onSetBackground,
+  onSetTheme,
   simulationRunning,
+  currentTheme,
 }: ControlsProps) {
   const [cwdInput, setCwdInput] = useState('/Users/dev/my-project');
 
@@ -34,6 +47,23 @@ export function Controls({
   return (
     <div className="controls-panel">
       <h3 className="mb-4 text-gray-800">Aura Prototype Controls</h3>
+
+      <div className="flex gap-1.5 mb-3 flex-wrap items-center">
+        <label className="text-sm text-gray-600 mr-1">Theme:</label>
+        {THEME_BUTTONS.map(({ id, label }) => (
+          <button
+            key={id}
+            onClick={() => onSetTheme(id)}
+            className={`px-3 py-1.5 border-none rounded-md cursor-pointer text-xs transition-colors ${
+              currentTheme === id
+                ? 'bg-indigo-800 text-white'
+                : 'bg-indigo-600 text-white hover:bg-indigo-700'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       <div className="flex gap-2 mb-3 flex-wrap items-center">
         <label className="text-sm text-gray-600">Background:</label>

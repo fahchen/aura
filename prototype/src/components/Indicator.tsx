@@ -6,6 +6,7 @@ interface IndicatorProps {
   sessions: Session[];
   onClick: () => void;
   onDragStart?: (e: React.MouseEvent) => void;
+  useShadow?: boolean;
 }
 
 type IndicatorState = 'idle' | 'attention' | 'running';
@@ -37,7 +38,7 @@ function getRandomIndex(currentIndex: number): number {
 const CYCLE_INTERVAL_MS = 2500;
 const SLIDE_DURATION_MS = 400;
 
-export function Indicator({ sessions, onClick, onDragStart }: IndicatorProps) {
+export function Indicator({ sessions, onClick, onDragStart, useShadow = false }: IndicatorProps) {
   const indicatorState = getIndicatorState(sessions);
   const [currentIndex, setCurrentIndex] = useState(() => Math.floor(Math.random() * CREATIVE_ICONS.length));
   const [nextIndex, setNextIndex] = useState<number | null>(null);
@@ -80,16 +81,13 @@ export function Indicator({ sessions, onClick, onDragStart }: IndicatorProps) {
   // Circle classes based on state
   const circleClasses = [
     'glass-indicator',
+    useShadow ? 'use-shadow' : '',
     indicatorState === 'attention' ? 'animate-shake animate-pulse-attention' : '',
     'group-hover:glass-indicator-hover',
   ].filter(Boolean).join(' ');
 
-  // Icon color classes based on state
-  const iconColorClass = indicatorState === 'attention'
-    ? 'text-white/95'
-    : indicatorState === 'running'
-      ? 'text-white'
-      : 'text-white/50';
+  // Icon color - always use theme indicator icon color
+  const iconColorClass = 'theme-icon-indicator';
 
   // Static icon for idle or attention
   if (!shouldCycle) {

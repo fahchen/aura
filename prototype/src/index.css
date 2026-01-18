@@ -1,3 +1,35 @@
+/* CSS Variables for theming */
+:root {
+  /* Default to liquid dark theme */
+  /* Design: subtle border + strong TOP highlight (light reflection) */
+  --text-primary: rgba(255, 255, 255, 0.95);
+  --text-secondary: rgba(255, 255, 255, 0.70);
+  --text-muted: rgba(255, 255, 255, 0.50);
+  --text-header: rgba(255, 255, 255, 0.60);
+
+  --icon-state: rgba(255, 255, 255, 0.85);
+  --icon-tool: rgba(255, 255, 255, 0.60);
+  --icon-indicator: rgba(255, 255, 255, 0.95);
+
+  --container-bg: rgba(255, 255, 255, 0.06);
+  --content-bg: rgba(255, 255, 255, 0.04);
+  --row-bg: rgba(255, 255, 255, 0.02);
+  --row-hover-bg: rgba(255, 255, 255, 0.08);
+  --indicator-bg: rgba(255, 255, 255, 0.08);
+
+  /* Borders: VERY SUBTLE - barely visible */
+  --border: rgba(255, 255, 255, 0.10);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  /* Top highlight: STRONG (light reflection) */
+  --content-highlight: rgba(255, 255, 255, 0.40);
+
+  --glass-highlight: rgba(255, 255, 255, 0.50);
+  --gloss: rgba(255, 255, 255, 0.30);
+
+  --use-shadow: 0;
+  --shadow-opacity: 0;
+}
+
 /* Base styles */
 * {
   box-sizing: border-box;
@@ -32,29 +64,17 @@ body.bg-dark {
   position: relative;
   overflow: hidden;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.15) 0%,
-    rgba(255, 255, 255, 0.05) 50%,
-    rgba(255, 255, 255, 0.1) 100%
-  );
-  backdrop-filter: blur(24px) saturate(200%);
-  -webkit-backdrop-filter: blur(24px) saturate(200%);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.2),
-    0 2px 8px rgba(0, 0, 0, 0.1),
-    inset 0 1px 1px rgba(255, 255, 255, 0.3),
-    inset 0 -1px 1px rgba(0, 0, 0, 0.1);
+  background: var(--indicator-bg);
+  border: 1.5px solid var(--border);
+}
+
+/* Shadow for solid themes */
+.glass-indicator.use-shadow {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, var(--shadow-opacity));
 }
 
 .group:hover .glass-indicator {
   transform: scale(1.08);
-  box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.25),
-    0 4px 12px rgba(0, 0, 0, 0.15),
-    inset 0 1px 2px rgba(255, 255, 255, 0.4),
-    inset 0 -1px 1px rgba(0, 0, 0, 0.1);
 }
 
 /* Session List Background */
@@ -62,21 +82,13 @@ body.bg-dark {
   position: absolute;
   inset: 0;
   border-radius: 16px;
-  background: linear-gradient(
-    165deg,
-    rgba(255, 255, 255, 0.12) 0%,
-    rgba(255, 255, 255, 0.05) 30%,
-    rgba(255, 255, 255, 0.08) 70%,
-    rgba(255, 255, 255, 0.1) 100%
-  );
-  backdrop-filter: blur(32px) saturate(200%);
-  -webkit-backdrop-filter: blur(32px) saturate(200%);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow:
-    0 8px 40px rgba(0, 0, 0, 0.15),
-    0 2px 12px rgba(0, 0, 0, 0.1),
-    inset 0 1px 1px rgba(255, 255, 255, 0.3),
-    inset 0 -1px 1px rgba(0, 0, 0, 0.05);
+  background: var(--container-bg);
+  border: 1.5px solid var(--border);
+}
+
+/* Shadow for solid themes */
+.glass-session-list-bg.use-shadow {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, var(--shadow-opacity));
 }
 
 /* Session List Content */
@@ -92,19 +104,9 @@ body.bg-dark {
   border-radius: 14px;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.08) 0%,
-    rgba(255, 255, 255, 0.04) 100%
-  );
-  backdrop-filter: blur(32px) saturate(200%);
-  -webkit-backdrop-filter: blur(32px) saturate(200%);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-top: none;
-  box-shadow:
-    0 4px 12px rgba(0, 0, 0, 0.15),
-    0 8px 32px rgba(0, 0, 0, 0.2),
-    0 16px 48px rgba(0, 0, 0, 0.15);
+  background: var(--content-bg);
+  border: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--content-highlight);
 }
 
 .glass-session-content::-webkit-scrollbar {
@@ -119,22 +121,11 @@ body.bg-dark {
   padding: 10px 14px;
   border-radius: 12px;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.06) 0%,
-    rgba(255, 255, 255, 0.02) 100%
-  );
+  background: var(--row-bg);
 }
 
 .glass-session-row:hover {
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.15) 0%,
-    rgba(255, 255, 255, 0.08) 100%
-  );
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  background: var(--row-hover-bg);
 }
 
 /* Controls Panel */
@@ -145,7 +136,7 @@ body.bg-dark {
   background: white;
   border-radius: 12px;
   padding: 20px;
-  max-width: 400px;
+  max-width: 500px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
 }
 
@@ -153,32 +144,55 @@ body.bg-dark {
 .indicator-gloss {
   position: absolute;
   top: 0;
-  left: 0;
-  right: 0;
-  height: 50%;
+  left: 6px;
+  right: 6px;
+  height: 1px;
   pointer-events: none;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.25) 0%,
-    rgba(255, 255, 255, 0.05) 100%
-  );
-  border-radius: 12px 12px 50% 50%;
+  background: var(--glass-highlight);
+  border-radius: 1px;
 }
 
-/* Attention state box shadow */
+/* Attention state */
 .shadow-attention {
-  box-shadow:
-    0 0 16px rgba(255, 255, 255, 0.1),
-    inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  border-color: var(--content-highlight);
 }
 
-/* Text shadow utilities */
+/* Text shadow utilities - removed for better readability */
 .text-shadow-sm {
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  /* text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); */
 }
 
 .text-shadow-md {
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  /* text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); */
+}
+
+/* Theme-aware text colors */
+.theme-text-primary {
+  color: var(--text-primary);
+}
+
+.theme-text-secondary {
+  color: var(--text-secondary);
+}
+
+.theme-text-muted {
+  color: var(--text-muted);
+}
+
+.theme-text-header {
+  color: var(--text-header);
+}
+
+.theme-icon-state {
+  color: var(--icon-state);
+}
+
+.theme-icon-tool {
+  color: var(--icon-tool);
+}
+
+.theme-icon-indicator {
+  color: var(--icon-indicator);
 }
 
 /* State icon transitions for replaceable mode */
