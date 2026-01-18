@@ -1,6 +1,6 @@
 import React, { memo, useState, useEffect, useRef, useCallback } from 'react';
 import type { Session } from '../types';
-import { STATE_ICONS, STATE_OPACITY, getToolIcon, getRandomPlaceholder } from '../constants';
+import { STATE_ICONS, STATE_OPACITY, getToolIcon, getRandomPlaceholder, PLACEHOLDER_ICONS, DEFAULT_PLACEHOLDER_ICON } from '../constants';
 import { Bomb } from 'lucide-react';
 
 interface SessionRowProps {
@@ -74,15 +74,18 @@ function SessionRowInner({ session, onRemove }: SessionRowProps) {
     state === 'idle' ? 'opacity-70' : '',
     state === 'stale' ? 'opacity-50 animate-breathe' : '',
     state === 'attention' ? 'shadow-attention' : '',
+    state === 'waiting' ? 'shadow-waiting' : '',
   ].filter(Boolean).join(' ');
 
   // State indicator classes
   const stateIndicatorClasses = [
     'shrink-0 w-4 h-4 flex items-center justify-center',
-    'font-mono text-sm text-white/70 text-shadow-sm',
-    state === 'attention' ? 'animate-shake' : '',
+    'font-mono text-sm theme-icon-state',
     onRemove ? 'cursor-pointer relative overflow-hidden' : '',
   ].filter(Boolean).join(' ');
+
+  // Animation class for the state icon only (not the bomb)
+  const stateIconAnimation = state === 'attention' ? 'animate-shake' : state === 'waiting' ? 'animate-spin-slow' : '';
 
   const StateIcon = STATE_ICONS[state];
   const opacity = STATE_OPACITY[state];
@@ -98,7 +101,7 @@ function SessionRowInner({ session, onRemove }: SessionRowProps) {
           {onRemove ? (
             <>
               {/* Default icon - slides right on hover */}
-              <span className="state-icon-slide group-hover:translate-x-4 group-hover:opacity-0">
+              <span className={`state-icon-slide group-hover:translate-x-4 group-hover:opacity-0 ${stateIconAnimation}`}>
                 <StateIcon size={14} strokeWidth={2} />
               </span>
               {/* Remove icon - slides in from left on hover */}
@@ -107,36 +110,44 @@ function SessionRowInner({ session, onRemove }: SessionRowProps) {
               </span>
             </>
           ) : (
-            <StateIcon size={14} strokeWidth={2} />
+            <StateIcon size={14} strokeWidth={2} className={stateIconAnimation} />
           )}
         </div>
         <div className="flex-1 min-w-0 overflow-hidden">
-          <span className="font-mono text-sm text-white/95 font-medium whitespace-nowrap overflow-hidden text-ellipsis text-shadow-md block">
+          <span className="font-mono text-sm theme-text-primary font-medium whitespace-nowrap overflow-hidden text-ellipsis block">
             {displayName}
           </span>
         </div>
       </div>
       <div className="flex items-center gap-1.5 pl-6 min-h-[18px]">
         {state === 'idle' && stoppedAt ? (
-          <span className="text-xs text-white/30 italic">waiting since {formatDateTime(stoppedAt)}</span>
+          <span className="text-xs theme-text-secondary italic">waiting since {formatDateTime(stoppedAt)}</span>
         ) : state === 'stale' && staleAt ? (
-          <span className="text-xs text-white/30 italic">inactive since {formatDateTime(staleAt)}</span>
+          <span className="text-xs theme-text-secondary italic">inactive since {formatDateTime(staleAt)}</span>
         ) : state === 'attention' ? (
-          <span className="text-xs text-white/30 italic">{permissionTool ?? 'Tool'} needs permission</span>
+          <span className="text-xs theme-text-secondary italic">{permissionTool ?? 'Tool'} needs permission</span>
+        ) : state === 'waiting' ? (
+          <div className="flex items-center gap-1.5 text-xs theme-text-secondary">
+            {(() => {
+              const WaitingIcon = PLACEHOLDER_ICONS.waiting ?? DEFAULT_PLACEHOLDER_ICON;
+              return <WaitingIcon size={12} strokeWidth={2} className="shrink-0 theme-icon-tool" />;
+            })()}
+            <span className="italic">waiting for input</span>
+          </div>
         ) : state === 'compacting' ? (
-          <span className="text-xs text-white/30 italic">compacting context...</span>
+          <span className="text-xs theme-text-secondary italic">compacting context...</span>
         ) : currentTool ? (
-          <div className="flex items-center gap-2 font-mono text-xs text-white/60 text-shadow-sm animate-fade-in-glass">
+          <div className="flex items-center gap-2 font-mono text-xs theme-text-secondary animate-fade-in-glass">
             {(() => {
               const ToolIcon = getToolIcon(currentTool.toolName);
-              return <ToolIcon size={12} strokeWidth={2} className="shrink-0 text-white/50" />;
+              return <ToolIcon size={12} strokeWidth={2} className="shrink-0 theme-icon-tool" />;
             })()}
             <span className="whitespace-nowrap overflow-hidden text-ellipsis italic">
               {currentTool.toolLabel ?? currentTool.toolName}
             </span>
           </div>
         ) : (
-          <span className="text-xs text-white/30 italic">{placeholderRef.current}</span>
+          <span className="text-xs theme-text-secondary italic">{placeholderRef.current}</span>
         )}
       </div>
     </div>

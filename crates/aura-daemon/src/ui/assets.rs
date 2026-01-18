@@ -18,6 +18,8 @@ impl AssetSource for Assets {
             "icons/bell-ring.svg" => include_bytes!("../../assets/icons/bell-ring.svg").as_slice(),
             "icons/cookie.svg" => include_bytes!("../../assets/icons/cookie.svg").as_slice(),
             "icons/ghost.svg" => include_bytes!("../../assets/icons/ghost.svg").as_slice(),
+            "icons/fan.svg" => include_bytes!("../../assets/icons/fan.svg").as_slice(),
+            "icons/wind.svg" => include_bytes!("../../assets/icons/wind.svg").as_slice(),
 
             // Tool icons (Lucide)
             "icons/terminal.svg" => include_bytes!("../../assets/icons/terminal.svg").as_slice(),

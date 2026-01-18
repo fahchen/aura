@@ -207,3 +207,22 @@ body.bg-dark {
 .duration-400 {
   transition-duration: 400ms;
 }
+
+/* Slow spin animation for waiting state Fan icon (counter-clockwise) */
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 2s linear infinite;
+}
+
+/* Waiting state shadow */
+.shadow-waiting {
+  border-color: var(--border);
+}

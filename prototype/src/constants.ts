@@ -4,6 +4,8 @@ import {
   Ghost,
   Cookie,
   BellRing,
+  Fan,
+  Wind,
   Bot,
   Panda,
   MessageSquareCode,
@@ -24,11 +26,11 @@ import {
   Newspaper,
   FilePenLine,
   FileBracesCorner,
-  Globe,
   Binoculars,
   MonitorDown,
   Plug,
   Ticket,
+  AudioLines,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -36,7 +38,8 @@ import {
 export const STATE_ICONS: Record<SessionState, LucideIcon> = {
   running: Cctv,
   idle: MessageSquareCode,  // waiting for user input after Stop
-  attention: BellRing,
+  attention: BellRing,      // needs permission to execute tool (highest priority)
+  waiting: Fan,             // waiting for user input (idle_prompt)
   compacting: Cookie,
   stale: Ghost,
 };
@@ -45,14 +48,16 @@ export const STATE_OPACITY: Record<SessionState, number> = {
   running: 1,
   idle: 0.8,
   attention: 1,
+  waiting: 1,
   compacting: 0.9,
   stale: 0.8,
 };
 
-// Indicator icons (3 states: idle, attention, running)
-export const INDICATOR_ICONS: Record<'idle' | 'attention' | 'running', LucideIcon> = {
-  idle: Panda,        // No sessions
-  attention: BellRing, // At least one attention session
+// Indicator icons (4 states: idle, attention, waiting, running)
+export const INDICATOR_ICONS: Record<'idle' | 'attention' | 'waiting' | 'running', LucideIcon> = {
+  idle: Panda,         // No sessions
+  attention: BellRing, // At least one session needs permission (highest priority)
+  waiting: Fan,        // At least one session waiting for input
   running: Bot,        // Other (cycles through creative icons)
 };
 
@@ -117,3 +122,11 @@ export function getRandomPlaceholder(): string {
   const index = Math.floor(Math.random() * PLACEHOLDER_TEXTS.length);
   return PLACEHOLDER_TEXTS[index];
 }
+
+// Placeholder icons for state-specific event lines
+export const PLACEHOLDER_ICONS: Partial<Record<SessionState, LucideIcon>> = {
+  waiting: Wind,
+};
+
+// Default placeholder icon (AudioLines)
+export const DEFAULT_PLACEHOLDER_ICON = AudioLines;

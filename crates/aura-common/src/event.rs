@@ -52,6 +52,12 @@ pub enum AgentEvent {
         cwd: String,
         message: Option<String>,
     },
+    /// Agent is waiting for user input (idle_prompt)
+    WaitingForInput {
+        session_id: String,
+        cwd: String,
+        message: Option<String>,
+    },
     /// Context compacting in progress
     Compacting { session_id: String, cwd: String },
     /// Agent is idle, waiting for user input
@@ -71,6 +77,7 @@ impl AgentEvent {
             | Self::ToolStarted { session_id, .. }
             | Self::ToolCompleted { session_id, .. }
             | Self::NeedsAttention { session_id, .. }
+            | Self::WaitingForInput { session_id, .. }
             | Self::Compacting { session_id, .. }
             | Self::Idle { session_id, .. }
             | Self::SessionEnded { session_id }
@@ -86,6 +93,7 @@ impl AgentEvent {
             | Self::ToolStarted { cwd, .. }
             | Self::ToolCompleted { cwd, .. }
             | Self::NeedsAttention { cwd, .. }
+            | Self::WaitingForInput { cwd, .. }
             | Self::Compacting { cwd, .. }
             | Self::Idle { cwd, .. } => cwd,
             Self::SessionEnded { .. } | Self::SessionNameUpdated { .. } => "",
@@ -126,16 +134,21 @@ mod tests {
                 cwd: "/tmp".into(),
                 message: Some("Permission needed".into()),
             },
-            AgentEvent::Compacting {
+            AgentEvent::WaitingForInput {
                 session_id: "s6".into(),
                 cwd: "/tmp".into(),
+                message: None,
             },
-            AgentEvent::Idle {
+            AgentEvent::Compacting {
                 session_id: "s7".into(),
                 cwd: "/tmp".into(),
             },
-            AgentEvent::SessionEnded {
+            AgentEvent::Idle {
                 session_id: "s8".into(),
+                cwd: "/tmp".into(),
+            },
+            AgentEvent::SessionEnded {
+                session_id: "s9".into(),
             },
         ];
 

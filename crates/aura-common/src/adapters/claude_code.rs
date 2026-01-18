@@ -316,7 +316,12 @@ impl From<HookEvent> for AgentEvent {
             },
             HookEvent::Notification(p) => {
                 match p.notification_type.as_deref() {
-                    Some("permission_prompt") | Some("idle_prompt") => AgentEvent::NeedsAttention {
+                    Some("permission_prompt") => AgentEvent::NeedsAttention {
+                        session_id: p.common.session_id,
+                        cwd: p.common.cwd,
+                        message: p.message,
+                    },
+                    Some("idle_prompt") => AgentEvent::WaitingForInput {
                         session_id: p.common.session_id,
                         cwd: p.common.cwd,
                         message: p.message,
@@ -491,10 +496,10 @@ mod tests {
         let event: AgentEvent = hook.into();
 
         match event {
-            AgentEvent::NeedsAttention { session_id, .. } => {
+            AgentEvent::WaitingForInput { session_id, .. } => {
                 assert_eq!(session_id, "abc123");
             }
-            _ => panic!("Expected NeedsAttention for idle_prompt"),
+            _ => panic!("Expected WaitingForInput for idle_prompt"),
         }
     }
 

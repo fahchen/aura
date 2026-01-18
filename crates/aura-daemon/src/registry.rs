@@ -207,6 +207,17 @@ impl SessionRegistry {
                 });
             }
 
+            AgentEvent::WaitingForInput {
+                session_id,
+                cwd,
+                message: _,
+            } => {
+                info!(%session_id, "waiting for input");
+                self.update_session(&session_id, &cwd, |session| {
+                    session.state = SessionState::Waiting;
+                });
+            }
+
             AgentEvent::Compacting { session_id, cwd } => {
                 info!(%session_id, "compacting");
                 self.update_session(&session_id, &cwd, |session| {
@@ -248,7 +259,10 @@ impl SessionRegistry {
 
             if now.duration_since(session.last_activity) > timeout {
                 // Only mark stale if not already in a terminal state
-                if session.state != SessionState::Idle && session.state != SessionState::Stale {
+                if session.state != SessionState::Idle
+                    && session.state != SessionState::Waiting
+                    && session.state != SessionState::Stale
+                {
                     session.state = SessionState::Stale;
                     session.stale_at = Some(Instant::now());
                 }
@@ -617,5 +631,25 @@ mod tests {
         let info = session.to_info();
         assert!(info.stale_at.is_some());
         assert!(info.stale_at.unwrap() > 0);
+    }
+
+    #[test]
+    fn waiting_state() {
+        let mut registry = SessionRegistry::new();
+
+        registry.process_event(AgentEvent::SessionStarted {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            agent: AgentType::ClaudeCode,
+        });
+
+        registry.process_event(AgentEvent::WaitingForInput {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            message: None,
+        });
+
+        let sessions = registry.get_all();
+        assert_eq!(sessions[0].state, SessionState::Waiting);
     }
 }

@@ -11,7 +11,7 @@ use super::icons;
 use super::theme::{ThemeColors, WINDOW_RADIUS};
 use aura_common::{RunningTool, SessionInfo, SessionState, PLACEHOLDER_TEXTS};
 use chrono::{DateTime, Local, Utc};
-use gpui::{div, px, svg, Div, Hsla, InteractiveElement, ParentElement, Styled};
+use gpui::{div, px, radians, svg, Div, Hsla, InteractiveElement, ParentElement, Styled, Transformation};
 use std::time::Instant;
 
 /// Session list dimensions
@@ -178,13 +178,22 @@ fn get_placeholder_text(session: &SessionInfo) -> String {
             let tool = session.permission_tool.as_deref().unwrap_or("Tool");
             format!("{} needs permission", tool)
         }
+        SessionState::Waiting => "waiting for input".to_string(),
         SessionState::Compacting => "compacting context...".to_string(),
         SessionState::Running => get_stable_placeholder(&session.session_id).to_string(),
     }
 }
 
-/// Render placeholder text with AudioLines icon (italic per design spec)
-fn render_placeholder(text: &str, theme: &ThemeColors) -> Div {
+/// Get placeholder icon path for a state
+fn get_placeholder_icon(state: SessionState) -> &'static str {
+    match state {
+        SessionState::Waiting => "icons/wind.svg",
+        _ => "icons/audio-lines.svg",
+    }
+}
+
+/// Render placeholder text with state-specific icon (italic per design spec)
+fn render_placeholder(text: &str, icon_path: &'static str, theme: &ThemeColors) -> Div {
     div()
         .w_full() // Fill parent container width
         .h(px(18.0)) // Fixed height for consistent layout
@@ -194,7 +203,7 @@ fn render_placeholder(text: &str, theme: &ThemeColors) -> Div {
         .gap(px(6.0))
         .overflow_hidden()
         .min_w_0()
-        // AudioLines icon
+        // State-specific icon
         .child(
             div()
                 .flex_shrink_0()
@@ -205,7 +214,7 @@ fn render_placeholder(text: &str, theme: &ThemeColors) -> Div {
                 .justify_center()
                 .child(
                     svg()
-                        .path("icons/audio-lines.svg")
+                        .path(icon_path)
                         .size(px(TOOL_ICON_WIDTH))
                         .text_color(theme.icon_tool),
                 ),
@@ -237,12 +246,13 @@ fn render_tool_or_placeholder(
     if session.running_tools.is_empty() {
         // Show state-specific placeholder
         let placeholder_text = get_placeholder_text(session);
+        let icon_path = get_placeholder_icon(session.state);
         return div()
             .flex_1()
             .min_w_0() // Allow shrinking for text ellipsis
             .h(px(18.0)) // Fixed height to match tool display
             .overflow_hidden()
-            .child(render_placeholder(&placeholder_text, theme));
+            .child(render_placeholder(&placeholder_text, icon_path, theme));
     }
 
     // Render tools with cross-fade animation
@@ -321,6 +331,9 @@ pub fn render_tool_with_icon(tool: &RunningTool, theme: &ThemeColors) -> Div {
         } else {
             tool.tool_label.clone().unwrap_or_else(|| tool.tool_name.clone())
         }
+    } else if tool.tool_name == "WebFetch" && tool.tool_label.is_none() {
+        // WebFetch without label shows "fetching..." placeholder
+        "fetching...".to_string()
     } else {
         tool.tool_label.as_deref().unwrap_or(&tool.tool_name).to_string()
     };
@@ -382,6 +395,7 @@ pub fn state_to_color(state: SessionState) -> Hsla {
         SessionState::Running => theme::GREEN,
         SessionState::Idle => theme::BLUE,
         SessionState::Attention => theme::YELLOW,
+        SessionState::Waiting => theme::YELLOW, // Same as Attention
         SessionState::Compacting => theme::PURPLE,
         SessionState::Stale => theme::GRAY,
     }
@@ -410,6 +424,15 @@ fn render_state_indicator(
         0.0
     };
 
+    // Calculate rotation for Waiting state (2 second full rotation, counter-clockwise)
+    let rotation_radians = if state == SessionState::Waiting {
+        let elapsed_ms = animation_start.elapsed().as_millis() as f32;
+        let rotation_period_ms = 2000.0;
+        -((elapsed_ms / rotation_period_ms) * std::f32::consts::TAU) // Negative for counter-clockwise
+    } else {
+        0.0
+    };
+
     // Themed icon with state-based opacity
     let state_icon_color = Hsla {
         a: base_opacity * state_opacity,
@@ -419,6 +442,18 @@ fn render_state_indicator(
     let remove_icon_color = Hsla {
         a: 0.9 * remove_opacity,
         ..theme.icon_state
+    };
+
+    // Build state icon SVG (with rotation for Waiting state)
+    let state_icon_svg = svg()
+        .path(icon_path)
+        .size(px(STATE_ICON_SIZE))
+        .text_color(state_icon_color);
+
+    let state_icon_svg = if rotation_radians != 0.0 {
+        state_icon_svg.with_transformation(Transformation::rotate(radians(rotation_radians)))
+    } else {
+        state_icon_svg
     };
 
     div()
@@ -440,12 +475,7 @@ fn render_state_indicator(
                 .justify_center()
                 .ml(px(shake_offset + state_x))
                 .opacity(state_opacity)
-                .child(
-                    svg()
-                        .path(icon_path)
-                        .size(px(STATE_ICON_SIZE))
-                        .text_color(state_icon_color),
-                ),
+                .child(state_icon_svg),
         )
         // Remove icon (slides in from left, fades in on hover)
         .child(
@@ -472,7 +502,7 @@ fn render_state_indicator(
 /// Get opacity for session state (from prototype)
 fn state_to_opacity(state: SessionState) -> f32 {
     match state {
-        SessionState::Running | SessionState::Attention => 1.0,
+        SessionState::Running | SessionState::Attention | SessionState::Waiting => 1.0,
         SessionState::Compacting => 0.9,
         SessionState::Idle | SessionState::Stale => 0.8,
     }

@@ -13,6 +13,7 @@ const SETUP_EVENTS = [
   { type: 'SessionStart', sessionId: 'sess-running', cwd: '/Users/dev/project', name: 'Fix Login' },
   { type: 'SessionStart', sessionId: 'sess-idle', cwd: '/Users/dev/project', name: 'Implement User Authentication Flow' },
   { type: 'SessionStart', sessionId: 'sess-attention', cwd: '/Users/dev/project', name: 'バグ修正と機能追加' },
+  { type: 'SessionStart', sessionId: 'sess-waiting', cwd: '/Users/dev/project', name: 'Code Review' },
   { type: 'SessionStart', sessionId: 'sess-compacting', cwd: '/Users/dev/project', name: '重构用户认证模块并优化性能' },
   { type: 'SessionStart', sessionId: 'sess-stale', cwd: '/Users/dev/project', name: 'API追加' },
   { type: 'SessionStart', sessionId: 'sess-long', cwd: '/Users/dev/project', name: 'Refactor Database Connection Pooling and Implement Retry Logic with Exponential Backoff' },
@@ -21,6 +22,7 @@ const SETUP_EVENTS = [
   { type: 'PreToolUse', sessionId: 'sess-running', toolId: 't1', toolName: 'Read', toolLabel: 'main.ts' },
   { type: 'Stop', sessionId: 'sess-idle' },
   { type: 'PermissionRequest', sessionId: 'sess-attention', toolName: 'Bash' },
+  { type: 'WaitingForInput', sessionId: 'sess-waiting' },
   { type: 'PreCompact', sessionId: 'sess-compacting' },
   { type: 'Stale', sessionId: 'sess-stale' },
   { type: 'PreToolUse', sessionId: 'sess-long', toolId: 't2', toolName: 'Edit', toolLabel: 'db/pool.ts' },
@@ -52,11 +54,13 @@ function getEventCycle(sessionId: string, step: number, cycleIndex: number) {
     { type: 'Stop', sessionId },
     // Attention (5)
     { type: 'PermissionRequest', sessionId, toolName: TOOL_NAMES[Math.floor(Math.random() * TOOL_NAMES.length)] },
-    // Compacting (6)
+    // Waiting (6)
+    { type: 'WaitingForInput', sessionId },
+    // Compacting (7)
     { type: 'PreCompact', sessionId },
-    // Stale (7)
+    // Stale (8)
     { type: 'Stale', sessionId },
-    // Back to running (8)
+    // Back to running (9)
     { type: 'UserPromptSubmit', sessionId },
   ];
   return events[cycleIndex % events.length];
@@ -151,7 +155,7 @@ export default function App() {
       // Skip sessions that are stale
       sessions.forEach((session, index) => {
         if (session.state === 'stale') return;
-        const cycleIndex = (step + index * 3) % 9; // 9 events in cycle, offset by 3
+        const cycleIndex = (step + index * 3) % 10; // 10 events in cycle, offset by 3
         handleEvent(getEventCycle(session.sessionId, step, cycleIndex));
       });
 
@@ -203,6 +207,16 @@ export default function App() {
     setThemeStyle(theme);
   }, []);
 
+  // Triple-click theme toggle: cycles through liquidDark → liquidLight → solidDark → solidLight
+  const handleToggleTheme = useCallback(() => {
+    setThemeStyle(prev => {
+      const themes: ThemeStyle[] = ['liquidDark', 'liquidLight', 'solidDark', 'solidLight'];
+      const currentIndex = themes.indexOf(prev);
+      const nextIndex = (currentIndex + 1) % themes.length;
+      return themes[nextIndex];
+    });
+  }, []);
+
   if (showIconPreview) {
     return (
       <>
@@ -227,7 +241,7 @@ export default function App() {
           cursor: isIndicatorDragging ? 'grabbing' : undefined,
         }}
       >
-        <Indicator sessions={sessions} onClick={handleToggleView} onDragStart={handleIndicatorMouseDown} useShadow={themeStyle === 'solidDark' || themeStyle === 'solidLight'} />
+        <Indicator sessions={sessions} onClick={handleToggleView} onDragStart={handleIndicatorMouseDown} useShadow={themeStyle === 'solidDark' || themeStyle === 'solidLight'} onToggleTheme={handleToggleTheme} />
       </div>
 
       {/* Session list with independent position */}

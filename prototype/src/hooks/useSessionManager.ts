@@ -81,6 +81,17 @@ export function useSessionManager() {
         break;
       }
 
+      case 'WaitingForInput': {
+        setSessions(prev =>
+          prev.map(s =>
+            s.sessionId === sessionId
+              ? { ...s, state: 'waiting' }
+              : s
+          )
+        );
+        break;
+      }
+
       case 'Stop': {
         setSessions(prev =>
           prev.map(s =>

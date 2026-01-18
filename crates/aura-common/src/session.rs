@@ -25,6 +25,8 @@ pub enum SessionState {
     Idle,
     /// Needs user attention (permission, etc.)
     Attention,
+    /// Waiting for user input (idle_prompt)
+    Waiting,
     /// Context window compacting
     Compacting,
     /// No activity for 10min+
@@ -37,6 +39,7 @@ pub enum StateIcon {
     Play,
     Stop,
     Bell,
+    Fan,
     Refresh,
     Pause,
 }
@@ -48,6 +51,7 @@ impl SessionState {
             Self::Running => StateIcon::Play,
             Self::Idle => StateIcon::Stop,
             Self::Attention => StateIcon::Bell,
+            Self::Waiting => StateIcon::Fan,
             Self::Compacting => StateIcon::Refresh,
             Self::Stale => StateIcon::Pause,
         }
@@ -59,6 +63,7 @@ impl SessionState {
             Self::Running => "#22C55E",   // Green
             Self::Idle => "#3B82F6",      // Blue
             Self::Attention => "#EAB308", // Yellow
+            Self::Waiting => "#EAB308",   // Yellow (same as Attention)
             Self::Compacting => "#A855F7", // Purple
             Self::Stale => "#6B7280",     // Gray
         }
@@ -75,6 +80,7 @@ mod tests {
         assert_eq!(SessionState::Running.icon(), StateIcon::Play);
         assert_eq!(SessionState::Idle.icon(), StateIcon::Stop);
         assert_eq!(SessionState::Attention.icon(), StateIcon::Bell);
+        assert_eq!(SessionState::Waiting.icon(), StateIcon::Fan);
         assert_eq!(SessionState::Compacting.icon(), StateIcon::Refresh);
         assert_eq!(SessionState::Stale.icon(), StateIcon::Pause);
     }
@@ -84,6 +90,7 @@ mod tests {
         assert_eq!(SessionState::Running.color(), "#22C55E");
         assert_eq!(SessionState::Idle.color(), "#3B82F6");
         assert_eq!(SessionState::Attention.color(), "#EAB308");
+        assert_eq!(SessionState::Waiting.color(), "#EAB308");
         assert_eq!(SessionState::Compacting.color(), "#A855F7");
         assert_eq!(SessionState::Stale.color(), "#6B7280");
     }

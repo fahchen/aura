@@ -7,9 +7,10 @@ interface IndicatorProps {
   onClick: () => void;
   onDragStart?: (e: React.MouseEvent) => void;
   useShadow?: boolean;
+  onToggleTheme?: () => void;
 }
 
-type IndicatorState = 'idle' | 'attention' | 'running';
+type IndicatorState = 'idle' | 'attention' | 'waiting' | 'running';
 
 function getIndicatorState(sessions: Session[]): IndicatorState {
   if (sessions.length === 0) {
@@ -17,8 +18,12 @@ function getIndicatorState(sessions: Session[]): IndicatorState {
   }
 
   const states = sessions.map(s => s.state);
+  // Priority: attention > waiting > running
   if (states.includes('attention')) {
     return 'attention';
+  }
+  if (states.includes('waiting')) {
+    return 'waiting';
   }
 
   return 'running';
@@ -38,12 +43,27 @@ function getRandomIndex(currentIndex: number): number {
 const CYCLE_INTERVAL_MS = 2500;
 const SLIDE_DURATION_MS = 400;
 
-export function Indicator({ sessions, onClick, onDragStart, useShadow = false }: IndicatorProps) {
+export function Indicator({ sessions, onClick, onDragStart, useShadow = false, onToggleTheme }: IndicatorProps) {
   const indicatorState = getIndicatorState(sessions);
   const [currentIndex, setCurrentIndex] = useState(() => Math.floor(Math.random() * CREATIVE_ICONS.length));
   const [nextIndex, setNextIndex] = useState<number | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const transitionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const clickTimesRef = useRef<number[]>([]);
+
+  // Triple-click theme switching
+  const handleClick = () => {
+    const now = Date.now();
+    // Filter to keep only clicks within 500ms, then add current click
+    clickTimesRef.current = [...clickTimesRef.current.filter(t => now - t < 500), now];
+
+    if (clickTimesRef.current.length >= 3) {
+      onToggleTheme?.();
+      clickTimesRef.current = [];
+      return;
+    }
+    onClick();
+  };
 
   // Cycle through creative icons only in 'running' state
   const shouldCycle = indicatorState === 'running';
@@ -89,19 +109,20 @@ export function Indicator({ sessions, onClick, onDragStart, useShadow = false }:
   // Icon color - always use theme indicator icon color
   const iconColorClass = 'theme-icon-indicator';
 
-  // Static icon for idle or attention
+  // Static icon for idle, permission, or waiting
   if (!shouldCycle) {
     const Icon = INDICATOR_ICONS[indicatorState];
+    const spinClass = indicatorState === 'waiting' ? 'animate-spin-slow' : '';
     return (
       <div
         className={`group ${indicatorClasses}`}
-        onClick={onClick}
+        onClick={handleClick}
         onMouseDown={onDragStart}
       >
         <div className={circleClasses}>
           <div className="indicator-gloss" />
           <div className={`absolute inset-0 flex items-center justify-center ${iconColorClass}`}>
-            <Icon size={16} strokeWidth={2} />
+            <Icon size={16} strokeWidth={2} className={spinClass} />
           </div>
         </div>
       </div>
@@ -115,7 +136,7 @@ export function Indicator({ sessions, onClick, onDragStart, useShadow = false }:
   return (
     <div
       className={`group ${indicatorClasses}`}
-      onClick={onClick}
+      onClick={handleClick}
       onMouseDown={onDragStart}
     >
       <div className={circleClasses}>

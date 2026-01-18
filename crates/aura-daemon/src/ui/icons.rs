@@ -50,6 +50,13 @@ pub mod state_icons {
         "M15 10h.01",
         "M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z",
     ];
+
+    /// Wind - Waiting state (Lucide wind icon)
+    pub const WAITING: &[&str] = &[
+        "M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2",
+        "M9.6 4.6A2 2 0 1 1 11 8H2",
+        "M12.6 19.4A2 2 0 1 0 14 16H2",
+    ];
 }
 
 /// Tool icon SVG paths (Lucide icons, 24x24 viewBox)
@@ -492,6 +499,7 @@ pub fn state_icon_path(state: aura_common::SessionState) -> &'static str {
         aura_common::SessionState::Running => "icons/cctv.svg",
         aura_common::SessionState::Idle => "icons/message-square-code.svg",
         aura_common::SessionState::Attention => "icons/bell-ring.svg",
+        aura_common::SessionState::Waiting => "icons/fan.svg",
         aura_common::SessionState::Compacting => "icons/cookie.svg",
         aura_common::SessionState::Stale => "icons/ghost.svg",
     }

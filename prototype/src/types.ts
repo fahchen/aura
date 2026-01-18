@@ -1,4 +1,4 @@
-export type SessionState = 'running' | 'idle' | 'attention' | 'compacting' | 'stale';
+export type SessionState = 'running' | 'idle' | 'attention' | 'waiting' | 'compacting' | 'stale';
 
 export interface RunningTool {
   toolId: string;

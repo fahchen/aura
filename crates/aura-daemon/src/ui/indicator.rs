@@ -14,7 +14,7 @@ use super::animation::{calculate_shake_offset, ease_out};
 use super::icons;
 use super::theme::ThemeColors;
 use aura_common::{SessionInfo, SessionState};
-use gpui::{div, prelude::FluentBuilder, px, svg, Div, Hsla, ParentElement, Styled};
+use gpui::{div, prelude::FluentBuilder, px, radians, svg, Div, Hsla, ParentElement, Styled, Transformation};
 use std::time::Instant;
 
 /// Indicator dimensions (matching React prototype: 36x36px rounded square)
@@ -36,6 +36,7 @@ const ICON_TRANSITION_MS: u64 = 400;
 
 /// SVG asset paths for static states
 const ICON_ATTENTION: &str = "icons/bell-ring.svg";
+const ICON_WAITING: &str = "icons/fan.svg";
 const ICON_NO_SESSIONS: &str = "icons/panda.svg";
 
 /// Indicator state
@@ -43,6 +44,8 @@ const ICON_NO_SESSIONS: &str = "icons/panda.svg";
 enum IndicatorState {
     /// Any session needs attention - shaking circle with bell icon
     Attention,
+    /// Any session waiting for user input
+    Waiting,
     /// Sessions exist, no attention needed - cycling creative icons
     Running,
     /// No sessions - low opacity circle with sleep icon
@@ -55,6 +58,8 @@ fn determine_state(sessions: &[SessionInfo]) -> IndicatorState {
         IndicatorState::NoSessions
     } else if sessions.iter().any(|s| s.state == SessionState::Attention) {
         IndicatorState::Attention
+    } else if sessions.iter().any(|s| s.state == SessionState::Waiting) {
+        IndicatorState::Waiting
     } else {
         IndicatorState::Running
     }
@@ -112,6 +117,7 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bo
 
     let (icon_path, bg_alpha_boost, icon_alpha, gloss_alpha_boost) = match state {
         IndicatorState::Attention => (ICON_ATTENTION, 0.02 + hover_bg_boost, 0.95, 0.01 + hover_gloss_boost),
+        IndicatorState::Waiting => (ICON_WAITING, hover_bg_boost, 0.9, hover_gloss_boost),
         IndicatorState::Running => {
             let (current, _, _) = running_state.unwrap();
             (current, hover_bg_boost, 1.0, hover_gloss_boost)
@@ -122,6 +128,15 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bo
     // Calculate shake offset for attention state
     let shake_offset = if state == IndicatorState::Attention {
         calculate_shake_offset(animation_start)
+    } else {
+        0.0
+    };
+
+    // Calculate rotation for waiting state (2 second full rotation, counter-clockwise)
+    let rotation_radians = if state == IndicatorState::Waiting {
+        let elapsed_ms = animation_start.elapsed().as_millis() as f32;
+        let rotation_period_ms = 2000.0; // 2 seconds per full rotation
+        -((elapsed_ms / rotation_period_ms) * std::f32::consts::TAU) // Negative for counter-clockwise
     } else {
         0.0
     };
@@ -257,19 +272,23 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bo
                                 )
                         }
                     } else {
-                        // Non-running states: single icon
+                        // Non-running states: single icon (with rotation for Waiting)
+                        let icon_svg = svg()
+                            .path(icon_path)
+                            .size(px(ICON_FONT_SIZE))
+                            .text_color(icon_color);
+
                         div()
                             .w(px(ICON_FONT_SIZE))
                             .h(px(ICON_FONT_SIZE))
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(
-                                svg()
-                                    .path(icon_path)
-                                    .size(px(ICON_FONT_SIZE))
-                                    .text_color(icon_color),
-                            )
+                            .child(if rotation_radians != 0.0 {
+                                icon_svg.with_transformation(Transformation::rotate(radians(rotation_radians)))
+                            } else {
+                                icon_svg
+                            })
                     },
                 ),
         )
