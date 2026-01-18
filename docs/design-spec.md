@@ -208,13 +208,6 @@ background: linear-gradient(
 | Placeholder text | `rgba(255,255,255,0.3)` |
 | Remove button | `rgba(255,255,255,0.3)` |
 
-### Indicator Icon Colors (by state)
-| State | Color |
-|-------|-------|
-| Running | `#fff` |
-| Idle | `rgba(255,255,255,0.5)` |
-| Attention | `rgba(255,255,255,0.95)` |
-
 ### Background Gradients
 | Element | Gradient |
 |---------|----------|

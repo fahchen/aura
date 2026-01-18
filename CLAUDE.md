@@ -129,21 +129,21 @@ echo '{"msg":"event","type":"tool_started","session_id":"'$SESSION'","tool_id":"
 echo '{"msg":"event","type":"tool_completed","session_id":"'$SESSION'","tool_id":"t1","cwd":"/tmp/test"}' | nc -U "$SOCK"
 
 # State transitions
-echo '{"msg":"event","type":"needs_attention","session_id":"'$SESSION'","message":"Permission required","cwd":"/tmp/test"}' | nc -U "$SOCK"  # Yellow
-echo '{"msg":"event","type":"activity","session_id":"'$SESSION'","cwd":"/tmp/test"}' | nc -U "$SOCK"  # Green
-echo '{"msg":"event","type":"compacting","session_id":"'$SESSION'","cwd":"/tmp/test"}' | nc -U "$SOCK"  # Purple
-echo '{"msg":"event","type":"idle","session_id":"'$SESSION'","cwd":"/tmp/test"}' | nc -U "$SOCK"  # Blue
+echo '{"msg":"event","type":"needs_attention","session_id":"'$SESSION'","message":"Permission required","cwd":"/tmp/test"}' | nc -U "$SOCK"
+echo '{"msg":"event","type":"activity","session_id":"'$SESSION'","cwd":"/tmp/test"}' | nc -U "$SOCK"
+echo '{"msg":"event","type":"compacting","session_id":"'$SESSION'","cwd":"/tmp/test"}' | nc -U "$SOCK"
+echo '{"msg":"event","type":"idle","session_id":"'$SESSION'","cwd":"/tmp/test"}' | nc -U "$SOCK"
 
 # End session
 echo '{"msg":"event","type":"session_ended","session_id":"'$SESSION'","cwd":"/tmp/test"}' | nc -U "$SOCK"
 ```
 
-| Event Type | HUD State | Color |
-|------------|-----------|-------|
-| `session_started` | Running | Green |
-| `tool_started/completed` | Running + tool | Green |
-| `needs_attention` | Attention | Yellow |
-| `activity` | Running | Green |
-| `compacting` | Compacting | Purple |
-| `idle` | Idle | Blue |
-| `session_ended` | Removed | — |
+| Event Type | HUD State |
+|------------|-----------|
+| `session_started` | Running |
+| `tool_started/completed` | Running + tool |
+| `needs_attention` | Attention |
+| `activity` | Running |
+| `compacting` | Compacting |
+| `idle` | Idle |
+| `session_ended` | Removed |

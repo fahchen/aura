@@ -387,20 +387,6 @@ pub fn extract_session_name(cwd: &str) -> String {
         .to_string()
 }
 
-/// Convert SessionState to color (used by indicator.rs)
-#[allow(dead_code)]
-pub fn state_to_color(state: SessionState) -> Hsla {
-    use super::theme;
-    match state {
-        SessionState::Running => theme::GREEN,
-        SessionState::Idle => theme::BLUE,
-        SessionState::Attention => theme::YELLOW,
-        SessionState::Waiting => theme::YELLOW, // Same as Attention
-        SessionState::Compacting => theme::PURPLE,
-        SessionState::Stale => theme::GRAY,
-    }
-}
-
 /// Render state indicator with SVG icon and opacity
 ///
 /// Uses themed icon color with varying opacity based on state urgency.

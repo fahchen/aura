@@ -121,18 +121,6 @@ Each icon sits in a subtle liquid glass pill:
 - Background: rgba(255, 255, 255, 0.1) with blur
 - Border: 1px rgba(255, 255, 255, 0.2)
 - Corner radius: 6px (pill shape)
-- Icon color: State-specific (see below)
-
-### State Colors
-
-| State | Color | Hex |
-|-------|-------|-----|
-| Running | Green | #22C55E |
-| Idle | Blue | #3B82F6 |
-| Attention | Yellow | #EAB308 |
-| Compacting | Purple | #A855F7 |
-| Stale | Gray | #6B7280 |
-
 ---
 
 ## State Icons

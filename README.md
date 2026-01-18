@@ -72,13 +72,13 @@ echo '{"msg":"event","type":"activity","session_id":"test","cwd":"/tmp"}' | nc -
 echo '{"msg":"event","type":"tool_started","session_id":"test","tool_id":"t1","tool_name":"Read","tool_label":"main.rs","cwd":"/tmp"}' | nc -U "$SOCK"
 ```
 
-| Event Type | State | Color |
-|------------|-------|-------|
-| `activity` | Running | Green |
-| `idle` | Idle | Blue |
-| `needs_attention` | Attention | Yellow |
-| `waiting_for_input` | Waiting | Yellow |
-| `compacting` | Compacting | Purple |
+| Event Type | State |
+|------------|-------|
+| `activity` | Running |
+| `idle` | Idle |
+| `needs_attention` | Attention |
+| `waiting_for_input` | Waiting |
+| `compacting` | Compacting |
 
 ## Development
 
