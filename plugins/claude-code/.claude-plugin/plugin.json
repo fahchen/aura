@@ -1,8 +1,0 @@
-{
-  "name": "aura",
-  "description": "Real-time HUD for Claude Code sessions - displays status, tools, and attention indicators",
-  "version": "0.1.0",
-  "author": {
-    "name": "fahchen"
-  }
-}

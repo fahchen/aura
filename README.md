@@ -49,7 +49,8 @@ export PATH="/path/to/aura/target/release:$PATH"
 aura-daemon
 
 # Install Claude Code plugin (in Claude Code)
-/plugin install github:fahchen/aura/plugins/claude-code
+/plugin marketplace add fahchen/skills
+/plugin install aura@fahchen-skills
 ```
 
 ---
@@ -63,9 +64,6 @@ cargo build -p aura-daemon       # Build daemon only
 
 # Prototype (React reference)
 cd prototype && bun dev
-
-# Local plugin install
-/plugin install /path/to/aura/plugins/claude-code
 ```
 
 ## Architecture
