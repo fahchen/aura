@@ -13,6 +13,16 @@ Aura monitors Claude Code and other AI agents as they work, displaying session s
 - Glassmorphism design with liquid glass aesthetic
 - Agent-agnostic architecture (Claude Code, Codex, custom agents)
 
+## Screenshots
+
+| Liquid Dark | Liquid Light |
+|-------------|--------------|
+| ![Liquid Dark](docs/screenshots/theme-liquid-dark.png) | ![Liquid Light](docs/screenshots/theme-liquid-light.png) |
+
+| Solid Dark | Solid Light |
+|------------|-------------|
+| ![Solid Dark](docs/screenshots/theme-solid-dark.png) | ![Solid Light](docs/screenshots/theme-solid-light.png) |
+
 ## Quick Start
 
 ```bash

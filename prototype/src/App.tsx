@@ -75,6 +75,7 @@ export default function App() {
   const [bgImage, setBgImage] = useState<string | null>(null);
   const [simulationRunning, setSimulationRunning] = useState(false);
   const [showIconPreview, setShowIconPreview] = useState(false);
+  const [showControls, setShowControls] = useState(true);
   const [themeStyle, setThemeStyle] = useState<ThemeStyle>('liquidDark');
   const simulationStep = useRef(0);
   const prevSessionCount = useRef(0);
@@ -262,23 +263,35 @@ export default function App() {
         </div>
       )}
 
+      {/* Toggle controls visibility button */}
       <button
-        onClick={() => setShowIconPreview(true)}
-        className="fixed top-5 right-5 px-4 py-2 bg-white/10 text-white border border-white/20 rounded-lg cursor-pointer"
+        onClick={() => setShowControls(prev => !prev)}
+        className="fixed bottom-5 right-5 px-3 py-1.5 bg-white/10 text-white/60 text-xs border border-white/20 rounded cursor-pointer hover:bg-white/20 hover:text-white transition-colors"
       >
-        Icon Preview
+        {showControls ? 'Hide UI' : 'Show UI'}
       </button>
 
-      <Controls
-        onToggleView={handleToggleView}
-        onRunSimulation={handleRunSimulation}
-        onStopSimulation={handleStopSimulation}
-        onAddSession={handleAddSession}
-        onSetBackground={handleSetBackground}
-        onSetTheme={handleSetTheme}
-        simulationRunning={simulationRunning}
-        currentTheme={themeStyle}
-      />
+      {showControls && (
+        <>
+          <button
+            onClick={() => setShowIconPreview(true)}
+            className="fixed top-5 right-5 px-4 py-2 bg-white/10 text-white border border-white/20 rounded-lg cursor-pointer"
+          >
+            Icon Preview
+          </button>
+
+          <Controls
+            onToggleView={handleToggleView}
+            onRunSimulation={handleRunSimulation}
+            onStopSimulation={handleStopSimulation}
+            onAddSession={handleAddSession}
+            onSetBackground={handleSetBackground}
+            onSetTheme={handleSetTheme}
+            simulationRunning={simulationRunning}
+            currentTheme={themeStyle}
+          />
+        </>
+      )}
     </>
   );
 }
