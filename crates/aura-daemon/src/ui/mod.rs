@@ -149,7 +149,7 @@ impl Render for IndicatorView {
             )
             .on_click({
                 let state_for_click = self.state.clone();
-                cx.listener(move |this, _event: &gpui::ClickEvent, window, app| {
+                cx.listener(move |this, event: &gpui::ClickEvent, window, app| {
                     // Check if window moved (was dragged)
                     if let Some(start_pos) = this.window_pos_at_mouse_down.take() {
                         let current_pos = window.bounds().origin;
@@ -162,25 +162,39 @@ impl Render for IndicatorView {
                         }
                     }
 
-                    let hud_state = state_for_click.read(app);
-                    let has_sessions = !hud_state.sessions.is_empty();
-                    let was_visible = hud_state.session_list_visible;
+                    match event.click_count() {
+                        3 => {
+                            // Triple-click: cycle theme
+                            state_for_click.update(app, |state, _cx| {
+                                state.theme_style = state.theme_style.next();
+                            });
+                        }
+                        1 => {
+                            // Single-click: toggle session list
+                            let hud_state = state_for_click.read(app);
+                            let has_sessions = !hud_state.sessions.is_empty();
+                            let was_visible = hud_state.session_list_visible;
 
-                    // Only allow opening if there are sessions
-                    if !was_visible && !has_sessions {
-                        return; // No sessions, don't open
-                    }
+                            // Only allow opening if there are sessions
+                            if !was_visible && !has_sessions {
+                                return; // No sessions, don't open
+                            }
 
-                    let should_open = !was_visible && hud_state.session_list_window.is_none();
-                    let _ = hud_state;
+                            let should_open = !was_visible && hud_state.session_list_window.is_none();
+                            let _ = hud_state;
 
-                    state_for_click.update(app, |state, _cx| {
-                        state.session_list_visible = !state.session_list_visible;
-                    });
+                            state_for_click.update(app, |state, _cx| {
+                                state.session_list_visible = !state.session_list_visible;
+                            });
 
-                    // If we need to show the window and it doesn't exist, open it
-                    if should_open {
-                        open_session_list_window_sync(app, state_for_click.clone());
+                            // If we need to show the window and it doesn't exist, open it
+                            if should_open {
+                                open_session_list_window_sync(app, state_for_click.clone());
+                            }
+                        }
+                        _ => {
+                            // Double-click or other: ignore
+                        }
                     }
                 })
             })
@@ -359,16 +373,7 @@ impl SessionListView {
 
 impl Render for SessionListView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Request continuous animation frames
-        window.request_animation_frame();
-
-        // Update system appearance
-        let appearance = window.appearance();
-        self.state.update(cx, |state, _cx| {
-            state.update_system_appearance(appearance);
-        });
-
-        // Check visibility - if not visible, close the window entirely
+        // Check visibility FIRST - if not visible, close the window without requesting frames
         let is_visible = self.state.read(cx).session_list_visible;
         if !is_visible {
             // Save current position before closing (for position persistence)
@@ -381,6 +386,15 @@ impl Render for SessionListView {
             window.remove_window();
             return div().size_full().into_any_element();
         }
+
+        // Request continuous animation frames (only for visible windows)
+        window.request_animation_frame();
+
+        // Update system appearance
+        let appearance = window.appearance();
+        self.state.update(cx, |state, _cx| {
+            state.update_system_appearance(appearance);
+        });
 
         let hud_state = self.state.read(cx);
         let sessions = &hud_state.sessions;

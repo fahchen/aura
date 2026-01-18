@@ -41,6 +41,17 @@ impl ThemeStyle {
             ThemeStyle::SolidLight => ResolvedStyle::SolidLight,
         }
     }
+
+    /// Cycle to next theme style
+    pub fn next(&self) -> Self {
+        match self {
+            ThemeStyle::System => ThemeStyle::LiquidDark,
+            ThemeStyle::LiquidDark => ThemeStyle::LiquidLight,
+            ThemeStyle::LiquidLight => ThemeStyle::SolidDark,
+            ThemeStyle::SolidDark => ThemeStyle::SolidLight,
+            ThemeStyle::SolidLight => ThemeStyle::System,
+        }
+    }
 }
 
 /// Resolved style after applying system detection
