@@ -105,3 +105,42 @@ export PATH="/path/to/aura/target/release:$PATH"
 ```
 
 The hook gracefully fails if daemon isn't running—Claude Code continues normally.
+
+## Sending Test Events
+
+Send IPC messages directly to test the HUD without running Claude Code.
+
+```bash
+# Find socket path
+SOCK="$(fd -t s aura.sock /var/folders 2>/dev/null | head -1)"
+
+# Ping test
+echo '{"msg":"ping"}' | nc -U "$SOCK"  # Response: {"msg":"pong"}
+
+# Create a test session
+SESSION="test-$(date +%s)"
+echo '{"msg":"event","type":"session_started","session_id":"'$SESSION'","cwd":"/tmp/test","agent":"claude_code"}' | nc -U "$SOCK"
+
+# Tool events
+echo '{"msg":"event","type":"tool_started","session_id":"'$SESSION'","tool_id":"t1","tool_name":"Read","tool_label":"main.rs","cwd":"/tmp/test"}' | nc -U "$SOCK"
+echo '{"msg":"event","type":"tool_completed","session_id":"'$SESSION'","tool_id":"t1","cwd":"/tmp/test"}' | nc -U "$SOCK"
+
+# State transitions
+echo '{"msg":"event","type":"needs_attention","session_id":"'$SESSION'","message":"Permission required","cwd":"/tmp/test"}' | nc -U "$SOCK"  # Yellow
+echo '{"msg":"event","type":"activity","session_id":"'$SESSION'","cwd":"/tmp/test"}' | nc -U "$SOCK"  # Green
+echo '{"msg":"event","type":"compacting","session_id":"'$SESSION'","cwd":"/tmp/test"}' | nc -U "$SOCK"  # Purple
+echo '{"msg":"event","type":"idle","session_id":"'$SESSION'","cwd":"/tmp/test"}' | nc -U "$SOCK"  # Blue
+
+# End session
+echo '{"msg":"event","type":"session_ended","session_id":"'$SESSION'","cwd":"/tmp/test"}' | nc -U "$SOCK"
+```
+
+| Event Type | HUD State | Color |
+|------------|-----------|-------|
+| `session_started` | Running | Green |
+| `tool_started/completed` | Running + tool | Green |
+| `needs_attention` | Attention | Yellow |
+| `activity` | Running | Green |
+| `compacting` | Compacting | Purple |
+| `idle` | Idle | Blue |
+| `session_ended` | Removed | — |
