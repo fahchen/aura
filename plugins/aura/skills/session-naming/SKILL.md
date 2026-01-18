@@ -16,12 +16,17 @@ aura set-name "<name>"
 
 ## Rules
 
-### Session name = Overall goal, NOT current step
+### Session name = Overall goal, optionally with current step
 
-The session name should describe **what we're trying to accomplish**, not what we're currently doing.
+The session name should describe **what we're trying to accomplish**. For larger tasks with distinct phases, use `Task - Step` format.
 
-- Good: "Add Dark Mode" (stays the same while reading files, writing code, testing)
-- Bad: "Reading Config" → "Writing Theme" → "Running Tests" (changing per step)
+- Simple task: "Fix Login" (stays the same throughout)
+- Multi-phase task: "Add Auth - Write Tests" → "Add Auth - Integration" (task stays, step updates)
+
+Use `Task - Step` format when:
+- The task has 3+ distinct phases (design, implement, test, deploy)
+- Each phase takes significant time
+- User benefits from knowing current progress
 
 ### MUST set session name when:
 1. User requests a task (e.g., "fix the login bug", "add dark mode")
@@ -38,7 +43,7 @@ The session name should describe **what we're trying to accomplish**, not what w
 
 | Rule | Good | Bad |
 |------|------|-----|
-| 2-4 words max | "Fix Login" | "Fix the authentication bug" |
+| 2-6 words | "Fix Login Auth Flow" | "Fix the authentication bug in the login system" |
 | Start with verb | "Add Export" | "Export Feature" |
 | No filler words | "Refactor API" | "Refactor the API Layer" |
 | No paths/files | "Update Config" | "Update src/config.ts" |
@@ -54,6 +59,7 @@ The session name should describe **what we're trying to accomplish**, not what w
 | "Add dark mode to the app" | "Add Dark Mode" |
 | "Help me understand this code" | (don't set) |
 | "Run the tests" | (don't set) |
+| Large feature with phases | "Add Auth - Design" → "Add Auth - Implement" → "Add Auth - Test" |
 
 ## Patterns
 
@@ -61,3 +67,4 @@ The session name should describe **what we're trying to accomplish**, not what w
 - `Add [Thing]` → "Add Export", "Add Dark Mode"
 - `Refactor [Area]` → "Refactor Auth", "Refactor API"
 - `Update [Thing]` → "Update Deps", "Update Config"
+- `[Task] - [Step]` → "Add Auth - Design", "Add Auth - Implement", "Add Auth - Test"
