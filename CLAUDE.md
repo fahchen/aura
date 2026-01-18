@@ -1,112 +1,107 @@
-# Aura
+# CLAUDE.md
 
-Real-time situational awareness HUD for AI code agents and CLIs.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## Build & Test Commands
 
-Aura provides a floating HUD window (gpui.rs) that displays status of multiple AI coding sessions. It supports various AI code agents through different integration methods:
+```bash
+# Build all crates
+cargo build --release
 
-| Phase | Agent | Integration |
-|-------|-------|-------------|
-| **Phase 1** | Claude Code | Hooks API |
-| **Phase 2** | Any CLI | PTY wrapper (`aura run <cmd>`) |
+# Build individual crates
+cargo build -p aura-daemon          # Main daemon + HUD
+cargo build -p aura-claude-code-hook  # Hook handler binary
+cargo build -p aura-common          # Shared types
 
-The HUD shows:
-- Session state (Running, Idle, Attention, Compacting, Stale)
-- Active tools with marquee display
-- Multiple concurrent sessions from different agents
+# Run daemon
+cargo run -p aura-daemon
+
+# Run all tests
+cargo test --workspace
+
+# Run tests for specific crate
+cargo test -p aura-common
+cargo test -p aura-daemon
+cargo test -p aura-claude-code-hook
+
+# Visual tests (requires feature flag)
+cargo run -p aura-daemon --features visual-tests --bin aura_visual_tests
+
+# Build macOS app bundle
+./scripts/bundle-macos.sh
+```
+
+### Prototype (React reference implementation)
+
+```bash
+cd prototype
+bun install
+bun dev        # Dev server at localhost:5173
+bun run build  # Production build
+```
 
 ## Architecture
 
-### Phase 1: Claude Code Hooks
-```
-Claude Code ──(10 hooks)──▶ hooks/aura-hook ──(IPC)──▶ Aura Daemon (gpui HUD)
-```
+Aura is a floating HUD that monitors AI coding sessions via hooks. Three crates form the core:
 
-### Phase 2: PTY Wrapper (Future)
 ```
-aura run <cmd> ──(PTY)──▶ Child Process
-       │
-       └──(IPC)──▶ Aura Daemon (gpui HUD)
+aura-common          # Shared types: AgentEvent, IpcMessage, SessionState
+    ↓
+aura-daemon          # IPC server + gpui HUD (two windows: Indicator + SessionList)
+    ↑
+aura-claude-code-hook  # Receives Claude Code hook JSON → sends IPC to daemon
 ```
 
-### Components
+### Threading Model
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| Hook Handler | `hooks/aura-hook` | Receives hook events, sends to daemon |
-| Daemon | `src/` | IPC server + gpui HUD |
+- **Main thread**: gpui runs the HUD windows (must not block)
+- **Background thread**: tokio runtime handles IPC server + stale detection
+- **Shared state**: `Arc<Mutex<SessionRegistry>>` bridges async and UI
 
-## Tech Stack
+### Event Flow
 
-- **Language:** Rust
-- **UI:** gpui.rs (GPU-accelerated)
-- **IPC:** interprocess crate (Unix socket / Windows named pipe)
-- **Async:** tokio
+```
+Claude Code hook (stdin JSON) → aura-claude-code-hook parses
+    → converts to AgentEvent (agent-agnostic)
+    → IpcMessage over Unix socket
+    → daemon server receives
+    → SessionRegistry::process_event() updates state
+    → gpui polls registry each frame
+    → renders Indicator + SessionList windows
+```
 
-## States
+### Key Modules
 
-| State | Icon (SVG) | Color | Trigger |
-|-------|------------|-------|---------|
-| Running | play | Green #22C55E | SessionStart, tool hooks |
-| Idle | stop | Blue #3B82F6 | Stop |
-| Attention | bell | Yellow #EAB308 | PermissionRequest |
-| Compacting | refresh | Purple #A855F7 | PreCompact |
-| Stale | pause | Gray #6B7280 | 60s timeout |
+| File | Purpose |
+|------|---------|
+| `aura-common/src/event.rs` | Generic `AgentEvent` enum (8 variants) |
+| `aura-common/src/adapters/claude_code.rs` | Hook parsing + tool label extraction |
+| `aura-daemon/src/registry.rs` | Session state machine, tool tracking |
+| `aura-daemon/src/server.rs` | tokio IPC server |
+| `aura-daemon/src/ui/mod.rs` | Two-window HUD driver |
+| `aura-daemon/src/ui/indicator.rs` | Collapsed 36×36 indicator window |
+| `aura-daemon/src/ui/session_list.rs` | Expanded session list window |
 
-Note: All icons rendered as SVG paths in gpui.
+### Session States
 
-## Hook Events (All 10)
+Running → Idle → Stale (10min timeout), or Running → Attention (permission needed), or Running → Compacting (context compact).
 
-| Hook | Action |
-|------|--------|
-| SessionStart | Register session → Running |
-| UserPromptSubmit | Health check → Running |
-| PreToolUse | Add tool to running_tools |
-| PostToolUse | Remove tool from running_tools |
-| PermissionRequest | → Attention |
-| Notification | → Running (or Attention if permission) |
-| Stop | → Idle, clear tools |
-| SubagentStop | Health check → Running |
-| PreCompact | → Compacting |
-| SessionEnd | Remove session |
+### Design Reference
 
-## Tool Icons (SVG)
+- `prototype/` - React implementation (source of truth for visual design)
+- `docs/design-spec.md` - Detailed visual specs (colors, animations, dimensions)
 
-| Tool | Icon | Tool | Icon |
-|------|------|------|------|
-| Task | robot | Bash | terminal |
-| Glob | folder | Grep | search |
-| Read | book | Edit | pencil |
-| Write | file | WebFetch | globe |
-| WebSearch | search | mcp__* | plug |
-| (other) | gear | | |
+## Claude Code Integration
 
-## Commands
+Install the plugin to connect Claude Code sessions to the HUD:
 
 ```bash
-# Build
-cargo build --release
+# Build hook handler and add to PATH
+cargo build --release -p aura-claude-code-hook
+export PATH="/path/to/aura/target/release:$PATH"
 
-# Run daemon
-cargo run
-
-# Run tests
-cargo test
+# Install plugin
+/plugin install /path/to/aura/plugins/aura
 ```
 
-## Target Agents
-
-| Agent | Status | Integration |
-|-------|--------|-------------|
-| Claude Code | Phase 1 | Hooks API |
-| Gemini CLI | Phase 2 | PTY wrapper |
-| OpenCode | Phase 2 | PTY wrapper |
-| Codex CLI | Phase 2 | PTY wrapper |
-| Any CLI | Phase 2 | PTY wrapper |
-
-## References
-
-- [Claude Code Hooks](https://code.claude.com/docs/en/hooks)
-- [gpui.rs](https://github.com/zed-industries/zed/tree/main/crates/gpui)
-- [interprocess](https://docs.rs/interprocess)
+The hook gracefully fails if daemon isn't running—Claude Code continues normally.
