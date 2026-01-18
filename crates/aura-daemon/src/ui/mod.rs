@@ -245,6 +245,7 @@ impl SessionListView {
         let row_opacity = match session.state {
             SessionState::Running => 1.0,
             SessionState::Attention => 1.0,
+            SessionState::Waiting => 1.0,
             SessionState::Compacting => 0.9,
             SessionState::Idle => 0.7,
             SessionState::Stale => calculate_breathe_opacity(animation_start),
@@ -332,6 +333,7 @@ impl SessionListView {
         let row_opacity = match session.state {
             SessionState::Running => 1.0,
             SessionState::Attention => 1.0,
+            SessionState::Waiting => 1.0,
             SessionState::Compacting => 0.9,
             SessionState::Idle => 0.7,
             SessionState::Stale => calculate_breathe_opacity(animation_start),
@@ -428,7 +430,7 @@ impl Render for SessionListView {
 
         // Detect sessions that have been removed (were in appeared_at but not in current)
         // and add them to the removing list for exit animation
-        for (session_id, _) in &self.appeared_at {
+        for session_id in self.appeared_at.keys() {
             if !current_ids.contains(session_id) && !self.removing.contains_key(session_id) {
                 // Get cached session info for exit animation
                 if let Some(session_info) = self.session_cache.get(session_id).cloned() {

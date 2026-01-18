@@ -284,15 +284,14 @@ impl From<HookEvent> for AgentEvent {
             },
             HookEvent::PreToolUse(p) => {
                 // Check if this is an `aura set-name` command
-                if p.tool_name == "Bash" {
-                    if let Some(command) = p.tool_input.as_ref().and_then(|v| v.get("command")).and_then(|v| v.as_str()) {
-                        if let Some(name) = parse_aura_set_name_command(command) {
-                            return AgentEvent::SessionNameUpdated {
-                                session_id: p.common.session_id,
-                                name,
-                            };
-                        }
-                    }
+                if p.tool_name == "Bash"
+                    && let Some(command) = p.tool_input.as_ref().and_then(|v| v.get("command")).and_then(|v| v.as_str())
+                    && let Some(name) = parse_aura_set_name_command(command)
+                {
+                    return AgentEvent::SessionNameUpdated {
+                        session_id: p.common.session_id,
+                        name,
+                    };
                 }
 
                 let tool_label = extract_tool_label(&p.tool_name, p.tool_input.as_ref());
