@@ -5,9 +5,11 @@
 
 use aura_daemon::{registry::SessionRegistry, server, ui};
 use clap::Parser;
+use std::path::PathBuf;
+use std::process::Command as ProcessCommand;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 use tracing_subscriber::{fmt, EnvFilter};
 
 /// Stale detection interval
@@ -48,6 +50,85 @@ fn init_tracing(verbose: u8) {
     fmt().with_env_filter(filter).with_target(false).init();
 }
 
+/// Install CLI tools to /usr/local/bin when running from an app bundle.
+/// This mimics VS Code's behavior of installing the `code` command.
+fn install_cli_tools() {
+    let Ok(exe_path) = std::env::current_exe() else {
+        debug!("Could not determine current exe path");
+        return;
+    };
+
+    let exe_path_str = exe_path.to_string_lossy();
+
+    // Check if running from an app bundle
+    if !exe_path_str.contains(".app/Contents/MacOS") {
+        debug!("Not running from app bundle, skipping CLI install");
+        return;
+    }
+
+    // Get the directory containing the daemon binary
+    let Some(macos_dir) = exe_path.parent() else {
+        debug!("Could not determine MacOS directory");
+        return;
+    };
+
+    // Check if hook binary exists next to daemon
+    let hook_source = macos_dir.join("aura-claude-code-hook");
+    if !hook_source.exists() {
+        debug!("Hook binary not found at {:?}", hook_source);
+        return;
+    }
+
+    let target_path = PathBuf::from("/usr/local/bin/aura-claude-code-hook");
+
+    // Check if symlink already exists and points to correct location
+    if target_path.is_symlink() {
+        if let Ok(link_target) = std::fs::read_link(&target_path) {
+            if link_target == hook_source {
+                debug!("CLI tool already installed correctly");
+                return;
+            }
+            info!(
+                "CLI symlink exists but points to {:?}, updating",
+                link_target
+            );
+        }
+    } else if target_path.exists() {
+        info!("CLI path exists but is not a symlink, skipping");
+        return;
+    }
+
+    // Create symlink with admin privileges using osascript
+    info!("Installing CLI tool to /usr/local/bin");
+
+    let hook_source_str = hook_source.to_string_lossy();
+    let script = format!(
+        "do shell script \"mkdir -p /usr/local/bin && ln -sf '{}' '/usr/local/bin/aura-claude-code-hook'\" with administrator privileges",
+        hook_source_str
+    );
+
+    match ProcessCommand::new("osascript")
+        .args(["-e", &script])
+        .output()
+    {
+        Ok(output) => {
+            if output.status.success() {
+                info!("CLI tool installed successfully");
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if stderr.contains("User canceled") || stderr.contains("(-128)") {
+                    info!("User canceled CLI installation");
+                } else {
+                    debug!("CLI installation failed: {}", stderr);
+                }
+            }
+        }
+        Err(e) => {
+            debug!("Failed to run osascript: {}", e);
+        }
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -58,6 +139,9 @@ fn main() {
     }
 
     init_tracing(cli.verbose);
+
+    // Install CLI tools if running from app bundle
+    install_cli_tools();
 
     // Shared registry between IPC server and UI
     // Using std::sync::Mutex so it's accessible from both tokio and gpui threads
