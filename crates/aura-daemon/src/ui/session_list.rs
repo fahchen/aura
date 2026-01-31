@@ -25,6 +25,17 @@ const STATE_ICON_SIZE: f32 = 14.0; // State icon in session row
 const HEADER_GAP: f32 = 8.0;
 const EVENT_PADDING_LEFT: f32 = 24.0; // Icon width (14) + gap (8) + 2 = align under name
 
+/// Shared render arguments for a session row.
+pub struct RowRenderArgs<'a> {
+    pub tool_index: usize,
+    pub fade_progress: f32,
+    pub animation_start: Instant,
+    pub state_opacity: f32,
+    pub state_x: f32,
+    pub remove_opacity: f32,
+    pub remove_x: f32,
+    pub theme: &'a ThemeColors,
+}
 
 /// Render the content of a session row (two-line vertical layout)
 ///
@@ -51,15 +62,7 @@ const EVENT_PADDING_LEFT: f32 = 24.0; // Icon width (14) + gap (8) + 2 = align u
 pub fn render_row_content(
     session: &SessionInfo,
     session_name: &str,
-    tool_index: usize,
-    fade_progress: f32,
-    animation_start: Instant,
-    // Icon swap animation parameters
-    state_opacity: f32,
-    state_x: f32,
-    remove_opacity: f32,
-    remove_x: f32,
-    theme: &ThemeColors,
+    args: &RowRenderArgs<'_>,
 ) -> Div {
     div()
         .w_full()
@@ -69,33 +72,19 @@ pub fn render_row_content(
         .px(px(14.0))
         .py(px(10.0))
         .rounded(px(WINDOW_RADIUS))
-        .bg(theme.row_bg)
-        .hover(|style| style.bg(theme.row_hover_bg))
+        .bg(args.theme.row_bg)
+        .hover(|style| style.bg(args.theme.row_hover_bg))
         // Session header (Line 1): icon + name
-        .child(render_session_header(
-            session.state,
-            session_name,
-            animation_start,
-            state_opacity,
-            state_x,
-            remove_opacity,
-            remove_x,
-            theme,
-        ))
+        .child(render_session_header(session.state, session_name, args))
         // Session event (Line 2): tool or placeholder
-        .child(render_session_event(session, tool_index, fade_progress, theme))
+        .child(render_session_event(session, args))
 }
 
 /// Render the session header (Line 1): state icon + session name
 fn render_session_header(
     state: SessionState,
     session_name: &str,
-    animation_start: Instant,
-    state_opacity: f32,
-    state_x: f32,
-    remove_opacity: f32,
-    remove_x: f32,
-    theme: &ThemeColors,
+    args: &RowRenderArgs<'_>,
 ) -> Div {
     div()
         .w_full()
@@ -105,7 +94,15 @@ fn render_session_header(
         .items_center()
         .gap(px(HEADER_GAP))
         // State icon (fixed width, with opacity + shake)
-        .child(render_state_indicator(state, animation_start, state_opacity, state_x, remove_opacity, remove_x, theme))
+        .child(render_state_indicator(
+            state,
+            args.animation_start,
+            args.state_opacity,
+            args.state_x,
+            args.remove_opacity,
+            args.remove_x,
+            args.theme,
+        ))
         // Session name (with ellipsis truncation)
         .child(
             div()
@@ -115,7 +112,7 @@ fn render_session_header(
                 .font_family("Maple Mono NF CN")
                 .text_size(px(14.0))
                 .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(theme.text_primary)
+                .text_color(args.theme.text_primary)
                 .whitespace_nowrap()
                 .text_ellipsis()
                 .child(session_name.to_string()),
@@ -125,9 +122,7 @@ fn render_session_header(
 /// Render the session event (Line 2): tool or placeholder
 fn render_session_event(
     session: &SessionInfo,
-    tool_index: usize,
-    fade_progress: f32,
-    theme: &ThemeColors,
+    args: &RowRenderArgs<'_>,
 ) -> Div {
     div()
         .w_full()
@@ -136,7 +131,12 @@ fn render_session_event(
         .items_center()
         .pl(px(EVENT_PADDING_LEFT)) // Align under session name
         .h(px(18.0)) // Fixed height to prevent layout jumps
-        .child(render_tool_or_placeholder(session, tool_index, fade_progress, theme))
+        .child(render_tool_or_placeholder(
+            session,
+            args.tool_index,
+            args.fade_progress,
+            args.theme,
+        ))
 }
 
 /// Format a Unix timestamp as "Jan 17, 14:30"

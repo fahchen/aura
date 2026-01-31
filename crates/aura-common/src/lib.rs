@@ -13,6 +13,7 @@
 mod event;
 mod ipc;
 mod session;
+pub mod time;
 pub mod transcript;
 
 pub mod adapters;
@@ -20,4 +21,5 @@ pub mod adapters;
 pub use event::*;
 pub use ipc::*;
 pub use session::*;
+pub use time::*;
 pub use transcript::*;

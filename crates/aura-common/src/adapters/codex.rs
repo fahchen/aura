@@ -65,14 +65,12 @@ pub fn discover_sessions(since: Option<std::time::SystemTime>) -> Vec<PathBuf> {
                                         && filename.ends_with(".jsonl")
                                     {
                                         // Check modification time if filter is set
-                                        if let Some(since_time) = since {
-                                            if let Ok(metadata) = file.metadata() {
-                                                if let Ok(modified) = metadata.modified() {
-                                                    if modified < since_time {
-                                                        continue;
-                                                    }
-                                                }
-                                            }
+                                        if let Some(since_time) = since
+                                            && let Ok(metadata) = file.metadata()
+                                            && let Ok(modified) = metadata.modified()
+                                            && modified < since_time
+                                        {
+                                            continue;
                                         }
                                         transcripts.push(file_path);
                                     }
@@ -169,26 +167,26 @@ pub fn parse_transcript_line(line: &str) -> Result<Option<TranscriptEntry>, Tran
             let mut tool_names = Vec::new();
             let mut tool_ids = Vec::new();
 
-            if let Some(content) = value.get("content") {
-                if let Some(content_array) = content.as_array() {
-                    for item in content_array {
-                        if let Some(item_type) = item.get("type").and_then(|v| v.as_str()) {
-                            match item_type {
-                                "input_text" | "output_text" => {
-                                    if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
-                                        text_content = Some(text.to_string());
-                                    }
+            if let Some(content) = value.get("content")
+                && let Some(content_array) = content.as_array()
+            {
+                for item in content_array {
+                    if let Some(item_type) = item.get("type").and_then(|v| v.as_str()) {
+                        match item_type {
+                            "input_text" | "output_text" => {
+                                if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                                    text_content = Some(text.to_string());
                                 }
-                                "tool_use" => {
-                                    if let Some(name) = item.get("name").and_then(|v| v.as_str()) {
-                                        tool_names.push(name.to_string());
-                                    }
-                                    if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
-                                        tool_ids.push(id.to_string());
-                                    }
-                                }
-                                _ => {}
                             }
+                            "tool_use" => {
+                                if let Some(name) = item.get("name").and_then(|v| v.as_str()) {
+                                    tool_names.push(name.to_string());
+                                }
+                                if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                                    tool_ids.push(id.to_string());
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -311,37 +309,31 @@ pub fn read_transcript_meta(path: &Path) -> Result<TranscriptMeta, TranscriptErr
 
         // Count messages
         let entry_type = value.get("type").and_then(|v| v.as_str());
-        match entry_type {
-            Some("message") => {
-                let role = value.get("role").and_then(|v| v.as_str());
-                match role {
-                    Some("user") => {
-                        meta.message_count += 1;
-                        meta.user_message_count += 1;
+        if let Some("message") = entry_type {
+            let role = value.get("role").and_then(|v| v.as_str());
+            match role {
+                Some("user") => {
+                    meta.message_count += 1;
+                    meta.user_message_count += 1;
 
-                        // Extract user prompt text
-                        if let Some(content) = value.get("content") {
-                            if let Some(content_array) = content.as_array() {
-                                for item in content_array {
-                                    if item.get("type").and_then(|v| v.as_str())
-                                        == Some("input_text")
-                                    {
-                                        if let Some(text) = item.get("text").and_then(|v| v.as_str())
-                                        {
-                                            last_user_prompt = Some(text.to_string());
-                                        }
-                                    }
-                                }
+                    // Extract user prompt text
+                    if let Some(content) = value.get("content")
+                        && let Some(content_array) = content.as_array()
+                    {
+                        for item in content_array {
+                            if item.get("type").and_then(|v| v.as_str()) == Some("input_text")
+                                && let Some(text) = item.get("text").and_then(|v| v.as_str())
+                            {
+                                last_user_prompt = Some(text.to_string());
                             }
                         }
                     }
-                    Some("assistant") => {
-                        meta.message_count += 1;
-                    }
-                    _ => {}
                 }
+                Some("assistant") => {
+                    meta.message_count += 1;
+                }
+                _ => {}
             }
-            _ => {}
         }
     }
 

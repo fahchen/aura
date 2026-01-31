@@ -9,6 +9,7 @@
 mod tests {
     use crate::ui::{
         assets::Assets, icons::colors, indicator, session_list,
+        theme,
         visual_test_helpers::{
             attention_session, capture_and_save, idle_session, mock_sessions, running_session,
         },
@@ -117,6 +118,7 @@ mod tests {
         let mut cx = VisualTestAppContext::with_asset_source(Arc::new(Assets));
         let animation_start = Instant::now();
         let session = running_session();
+        let theme = theme::ThemeColors::liquid_dark();
 
         let window = cx
             .open_offscreen_window(size(px(320.0), px(56.0)), |_window, app| {
@@ -125,13 +127,16 @@ mod tests {
                         session_list::render_row_content(
                             &session,
                             "running",
-                            0,     // tool_index
-                            0.0,   // fade_progress
-                            animation_start,
-                            1.0,   // state_opacity
-                            0.0,   // state_x
-                            0.0,   // remove_opacity
-                            -16.0, // remove_x
+                            &session_list::RowRenderArgs {
+                                tool_index: 0,
+                                fade_progress: 0.0,
+                                animation_start,
+                                state_opacity: 1.0,
+                                state_x: 0.0,
+                                remove_opacity: 0.0,
+                                remove_x: -16.0,
+                                theme: &theme,
+                            },
                         )
                         .into_any_element()
                     }),
@@ -198,6 +203,7 @@ mod tests {
         let mut cx = VisualTestAppContext::with_asset_source(Arc::new(Assets));
         let animation_start = Instant::now();
         let session = attention_session();
+        let theme = theme::ThemeColors::liquid_dark();
 
         let window = cx
             .open_offscreen_window(size(px(320.0), px(56.0)), |_window, app| {
@@ -206,13 +212,16 @@ mod tests {
                         session_list::render_row_content(
                             &session,
                             "attention",
-                            0,     // tool_index
-                            0.0,   // fade_progress
-                            animation_start,
-                            1.0,   // state_opacity
-                            0.0,   // state_x
-                            0.0,   // remove_opacity
-                            -16.0, // remove_x
+                            &session_list::RowRenderArgs {
+                                tool_index: 0,
+                                fade_progress: 0.0,
+                                animation_start,
+                                state_opacity: 1.0,
+                                state_x: 0.0,
+                                remove_opacity: 0.0,
+                                remove_x: -16.0,
+                                theme: &theme,
+                            },
                         )
                         .into_any_element()
                     }),
@@ -230,6 +239,7 @@ mod tests {
     fn test_session_list_window() {
         let mut cx = VisualTestAppContext::with_asset_source(Arc::new(Assets));
         let animation_start = Instant::now();
+        let theme = theme::ThemeColors::liquid_dark();
 
         // Create 3 sessions with different states
         let sessions = vec![running_session(), attention_session(), idle_session()];
@@ -270,35 +280,44 @@ mod tests {
                             .child(session_list::render_row_content(
                                 &sessions[0],
                                 sessions[0].name.as_deref().unwrap_or("running"),
-                                0,     // tool_index
-                                0.0,   // fade_progress
-                                animation_start,
-                                1.0,   // state_opacity
-                                0.0,   // state_x
-                                0.0,   // remove_opacity
-                                -16.0, // remove_x
+                                &session_list::RowRenderArgs {
+                                    tool_index: 0,
+                                    fade_progress: 0.0,
+                                    animation_start,
+                                    state_opacity: 1.0,
+                                    state_x: 0.0,
+                                    remove_opacity: 0.0,
+                                    remove_x: -16.0,
+                                    theme: &theme,
+                                },
                             ))
                             .child(session_list::render_row_content(
                                 &sessions[1],
                                 sessions[1].name.as_deref().unwrap_or("attention"),
-                                0,     // tool_index
-                                0.0,   // fade_progress
-                                animation_start,
-                                1.0,   // state_opacity
-                                0.0,   // state_x
-                                0.0,   // remove_opacity
-                                -16.0, // remove_x
+                                &session_list::RowRenderArgs {
+                                    tool_index: 0,
+                                    fade_progress: 0.0,
+                                    animation_start,
+                                    state_opacity: 1.0,
+                                    state_x: 0.0,
+                                    remove_opacity: 0.0,
+                                    remove_x: -16.0,
+                                    theme: &theme,
+                                },
                             ))
                             .child(session_list::render_row_content(
                                 &sessions[2],
                                 sessions[2].name.as_deref().unwrap_or("idle"),
-                                0,     // tool_index
-                                0.0,   // fade_progress
-                                animation_start,
-                                1.0,   // state_opacity
-                                0.0,   // state_x
-                                0.0,   // remove_opacity
-                                -16.0, // remove_x
+                                &session_list::RowRenderArgs {
+                                    tool_index: 0,
+                                    fade_progress: 0.0,
+                                    animation_start,
+                                    state_opacity: 1.0,
+                                    state_x: 0.0,
+                                    remove_opacity: 0.0,
+                                    remove_x: -16.0,
+                                    theme: &theme,
+                                },
                             ))
                             .into_any_element()
                     }),

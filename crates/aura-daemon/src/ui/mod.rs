@@ -198,7 +198,7 @@ impl Render for IndicatorView {
                             let hud_state = state_for_click.read(app);
                             let has_sessions = !hud_state.sessions.is_empty();
                             let was_visible = hud_state.session_list_visible;
-                            let window_handle = hud_state.session_list_window.clone();
+                            let window_handle = hud_state.session_list_window;
 
                             // Only allow opening if there are sessions
                             if !was_visible && !has_sessions {
@@ -334,14 +334,16 @@ impl SessionListView {
             .child(session_list::render_row_content(
                 session,
                 &session_name,
-                tool_index,
-                fade_progress,
-                animation_start,
-                state_opacity,
-                state_x,
-                remove_opacity,
-                remove_x,
-                theme_colors,
+                &session_list::RowRenderArgs {
+                    tool_index,
+                    fade_progress,
+                    animation_start,
+                    state_opacity,
+                    state_x,
+                    remove_opacity,
+                    remove_x,
+                    theme: theme_colors,
+                },
             ))
             // Remove button overlay - positioned over the state icon area
             // Only clickable when remove icon is visible (hover state)
@@ -402,14 +404,16 @@ impl SessionListView {
             .child(session_list::render_row_content(
                 session,
                 &session_name,
-                tool_index,
-                fade_progress,
-                animation_start,
-                1.0,   // State icon visible
-                0.0,   // No x offset
-                0.0,   // Remove icon hidden
-                -16.0, // Remove icon off-screen
-                theme_colors,
+                &session_list::RowRenderArgs {
+                    tool_index,
+                    fade_progress,
+                    animation_start,
+                    state_opacity: 1.0,   // State icon visible
+                    state_x: 0.0,         // No x offset
+                    remove_opacity: 0.0,  // Remove icon hidden
+                    remove_x: -16.0,      // Remove icon off-screen
+                    theme: theme_colors,
+                },
             ))
     }
 }

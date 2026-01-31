@@ -129,7 +129,14 @@ fn main() {
                                 is_active,
                             } => {
                                 if let Ok(mut reg) = watcher_registry.lock() {
-                                    reg.update_from_watcher(&session_id, &cwd, agent, meta, None, is_active);
+                                    reg.update_from_watcher(
+                                        &session_id,
+                                        &cwd,
+                                        agent,
+                                        *meta,
+                                        None,
+                                        is_active,
+                                    );
                                 }
                             }
                             aura_daemon::watcher::WatcherEvent::SessionRemoved { session_id } => {

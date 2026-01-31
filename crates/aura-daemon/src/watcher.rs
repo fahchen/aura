@@ -16,6 +16,7 @@ use aura_common::{
     adapters::{claude_code, codex},
     transcript::TranscriptMeta,
     AgentType,
+    time::parse_rfc3339_system_time,
 };
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
@@ -40,122 +41,10 @@ struct FileState {
     mtime: SystemTime,
     /// Session ID extracted from this file
     session_id: String,
-    /// Agent type (Claude Code or Codex)
-    #[allow(dead_code)]
-    agent: AgentType,
-    /// CWD from transcript metadata
-    #[allow(dead_code)]
-    cwd: Option<String>,
-    /// Last parsed metadata
-    #[allow(dead_code)]
-    meta: Option<TranscriptMeta>,
-    /// Whether we've emitted SessionStarted for this
-    #[allow(dead_code)]
-    started: bool,
 }
 
 /// How recently a file must be modified to be considered "active" (10 minutes)
 const ACTIVE_THRESHOLD_SECS: u64 = 600;
-
-/// Parse an ISO 8601 timestamp string into SystemTime.
-///
-/// Supports formats like:
-/// - "2026-01-31T12:45:31.053Z" (with milliseconds)
-/// - "2026-01-31T12:45:31Z" (without milliseconds)
-/// - "2026-01-31T12:45:31.053+00:00" (with timezone offset)
-fn parse_iso_timestamp(ts: &str) -> Option<SystemTime> {
-    // Try to parse the timestamp using a simple approach
-    // Format: YYYY-MM-DDTHH:MM:SS[.mmm][Z|+HH:MM]
-
-    // Remove the timezone suffix and get the core datetime
-    let ts = ts.trim();
-
-    // Handle 'Z' suffix (UTC)
-    let ts = ts.strip_suffix('Z').unwrap_or(ts);
-
-    // Handle timezone offset like +00:00 or -05:00
-    let ts = if let Some(pos) = ts.rfind('+') {
-        &ts[..pos]
-    } else if let Some(pos) = ts.rfind('-') {
-        // Only strip if it's a timezone offset (after time portion)
-        // Date dashes are at positions 4 and 7
-        if pos > 10 {
-            &ts[..pos]
-        } else {
-            ts
-        }
-    } else {
-        ts
-    };
-
-    // Split into date and time
-    let parts: Vec<&str> = ts.split('T').collect();
-    if parts.len() != 2 {
-        return None;
-    }
-
-    let date_parts: Vec<&str> = parts[0].split('-').collect();
-    if date_parts.len() != 3 {
-        return None;
-    }
-
-    let year: i32 = date_parts[0].parse().ok()?;
-    let month: u32 = date_parts[1].parse().ok()?;
-    let day: u32 = date_parts[2].parse().ok()?;
-
-    // Parse time, handling optional milliseconds
-    let time_str = parts[1];
-    let (time_main, _millis) = if let Some(dot_pos) = time_str.find('.') {
-        let main = &time_str[..dot_pos];
-        let millis_str = &time_str[dot_pos + 1..];
-        let millis: u32 = millis_str.parse().unwrap_or(0);
-        (main, millis)
-    } else {
-        (time_str, 0u32)
-    };
-
-    let time_parts: Vec<&str> = time_main.split(':').collect();
-    if time_parts.len() < 2 {
-        return None;
-    }
-
-    let hour: u32 = time_parts[0].parse().ok()?;
-    let minute: u32 = time_parts[1].parse().ok()?;
-    let second: u32 = time_parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
-
-    // Convert to Unix timestamp (simplified calculation assuming UTC)
-    // Days from year 1970 to target year
-    let mut days: i64 = 0;
-    for y in 1970..year {
-        days += if is_leap_year(y) { 366 } else { 365 };
-    }
-
-    // Days from months in target year
-    let days_in_months = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    for m in 1..month {
-        days += days_in_months[(m - 1) as usize] as i64;
-        if m == 2 && is_leap_year(year) {
-            days += 1;
-        }
-    }
-
-    // Add day of month (1-indexed)
-    days += (day - 1) as i64;
-
-    // Convert to seconds
-    let total_secs = days * 86400 + (hour as i64) * 3600 + (minute as i64) * 60 + (second as i64);
-
-    if total_secs < 0 {
-        return None;
-    }
-
-    Some(SystemTime::UNIX_EPOCH + Duration::from_secs(total_secs as u64))
-}
-
-/// Check if a year is a leap year.
-fn is_leap_year(year: i32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
-}
 
 /// Events emitted by the watcher
 #[derive(Debug, Clone)]
@@ -165,7 +54,7 @@ pub enum WatcherEvent {
         session_id: String,
         cwd: String,
         agent: AgentType,
-        meta: TranscriptMeta,
+        meta: Box<TranscriptMeta>,
         /// True if the file was modified recently (within ACTIVE_THRESHOLD_SECS)
         is_active: bool,
     },
@@ -331,7 +220,7 @@ impl TranscriptWatcher {
     fn handle_fs_event(&mut self, event: Event) {
         for path in event.paths {
             // Only process .jsonl files
-            if !path.extension().is_some_and(|e| e == "jsonl") {
+            if path.extension().is_none_or(|e| e != "jsonl") {
                 continue;
             }
 
@@ -386,11 +275,11 @@ impl TranscriptWatcher {
         let mtime = metadata.modified().ok()?;
 
         // Check if we need to process this file
-        if let Some(state) = self.files.get(path) {
-            if state.mtime >= mtime {
-                trace!("File unchanged: {}", path.display());
-                return None; // No change
-            }
+        if let Some(state) = self.files.get(path)
+            && state.mtime >= mtime
+        {
+            trace!("File unchanged: {}", path.display());
+            return None; // No change
         }
 
         // Read transcript metadata
@@ -432,10 +321,6 @@ impl TranscriptWatcher {
             FileState {
                 mtime,
                 session_id: session_id.clone(),
-                agent: agent.clone(),
-                cwd: Some(cwd.clone()),
-                meta: Some(meta.clone()),
-                started: true,
             },
         );
 
@@ -443,7 +328,7 @@ impl TranscriptWatcher {
         let is_active = meta
             .last_event_timestamp
             .as_ref()
-            .and_then(|ts| parse_iso_timestamp(ts))
+            .and_then(|ts| parse_rfc3339_system_time(ts))
             .map(|event_time| {
                 let now = std::time::SystemTime::now();
                 now.duration_since(event_time)
@@ -472,7 +357,7 @@ impl TranscriptWatcher {
             session_id,
             cwd,
             agent,
-            meta,
+            meta: Box::new(meta),
             is_active,
         })
     }
@@ -486,19 +371,19 @@ impl TranscriptWatcher {
 
         // Scan Claude Code transcripts
         for path in claude_code::discover_transcripts(None) {
-            if !self.files.contains_key(&path) {
-                if let Some(event) = self.process_file(&path) {
-                    events.push(event);
-                }
+            if !self.files.contains_key(&path)
+                && let Some(event) = self.process_file(&path)
+            {
+                events.push(event);
             }
         }
 
         // Scan Codex sessions
         for path in codex::discover_sessions(None) {
-            if !self.files.contains_key(&path) {
-                if let Some(event) = self.process_file(&path) {
-                    events.push(event);
-                }
+            if !self.files.contains_key(&path)
+                && let Some(event) = self.process_file(&path)
+            {
+                events.push(event);
             }
         }
 
@@ -626,7 +511,7 @@ mod tests {
             session_id: "test-session".into(),
             cwd: "/tmp/test".into(),
             agent: AgentType::ClaudeCode,
-            meta: TranscriptMeta::default(),
+            meta: Box::new(TranscriptMeta::default()),
             is_active: true,
         };
 
@@ -680,106 +565,9 @@ mod tests {
         let state = FileState {
             mtime: SystemTime::now(),
             session_id: "session-123".into(),
-            agent: AgentType::Codex,
-            cwd: Some("/tmp/project".into()),
-            meta: None,
-            started: false,
         };
 
         assert_eq!(state.session_id, "session-123");
-        assert_eq!(state.agent, AgentType::Codex);
-        assert_eq!(state.cwd, Some("/tmp/project".into()));
-        assert!(!state.started);
     }
 
-    // ==================== ISO timestamp parsing ====================
-
-    #[test]
-    fn parse_iso_timestamp_with_z_suffix() {
-        let ts = "2026-01-31T12:45:31.053Z";
-        let result = parse_iso_timestamp(ts);
-        assert!(result.is_some());
-
-        // Verify the parsed time is reasonable (after Unix epoch)
-        let system_time = result.unwrap();
-        assert!(system_time > SystemTime::UNIX_EPOCH);
-    }
-
-    #[test]
-    fn parse_iso_timestamp_without_millis() {
-        let ts = "2026-01-31T12:45:31Z";
-        let result = parse_iso_timestamp(ts);
-        assert!(result.is_some());
-    }
-
-    #[test]
-    fn parse_iso_timestamp_with_offset() {
-        let ts = "2026-01-31T12:45:31.053+00:00";
-        let result = parse_iso_timestamp(ts);
-        assert!(result.is_some());
-    }
-
-    #[test]
-    fn parse_iso_timestamp_with_negative_offset() {
-        let ts = "2026-01-31T07:45:31.053-05:00";
-        let result = parse_iso_timestamp(ts);
-        assert!(result.is_some());
-    }
-
-    #[test]
-    fn parse_iso_timestamp_invalid() {
-        assert!(parse_iso_timestamp("not a timestamp").is_none());
-        assert!(parse_iso_timestamp("2026-01-31").is_none()); // missing time
-        assert!(parse_iso_timestamp("12:45:31").is_none()); // missing date
-        assert!(parse_iso_timestamp("").is_none());
-    }
-
-    #[test]
-    fn parse_iso_timestamp_is_recent() {
-        // A timestamp from now should be considered recent
-        let now = SystemTime::now();
-        let duration_since_epoch = now.duration_since(SystemTime::UNIX_EPOCH).unwrap();
-        let secs = duration_since_epoch.as_secs();
-
-        // Convert to components (simplified, assumes UTC)
-        let days = secs / 86400;
-        let remaining = secs % 86400;
-        let hours = remaining / 3600;
-        let minutes = (remaining % 3600) / 60;
-        let seconds = remaining % 60;
-
-        // Calculate year/month/day from days since epoch (simplified)
-        let mut year = 1970;
-        let mut remaining_days = days as i64;
-        while remaining_days >= if is_leap_year(year) { 366 } else { 365 } {
-            remaining_days -= if is_leap_year(year) { 366 } else { 365 };
-            year += 1;
-        }
-
-        let days_in_months: [i64; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-        let mut month = 1;
-        for (i, &days_in_month) in days_in_months.iter().enumerate() {
-            let mut dm = days_in_month;
-            if i == 1 && is_leap_year(year) {
-                dm = 29;
-            }
-            if remaining_days < dm {
-                break;
-            }
-            remaining_days -= dm;
-            month += 1;
-        }
-        let day = remaining_days + 1;
-
-        let ts = format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-            year, month, day, hours, minutes, seconds
-        );
-
-        let parsed = parse_iso_timestamp(&ts).unwrap();
-        let elapsed = now.duration_since(parsed).unwrap_or(Duration::ZERO);
-
-        // Should be within a few seconds of now
-        assert!(elapsed.as_secs() < 5, "Parsed time should be recent");
-    }
 }

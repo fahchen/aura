@@ -246,7 +246,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(100));
         let opacity = calculate_breathe_opacity(start);
         assert!(
-            opacity >= BREATHE_MIN_OPACITY - 0.01 && opacity <= BREATHE_MAX_OPACITY + 0.01,
+            (BREATHE_MIN_OPACITY - 0.01..=BREATHE_MAX_OPACITY + 0.01).contains(&opacity),
             "Opacity should be in range [0.3, 0.5], got {}",
             opacity
         );

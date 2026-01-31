@@ -189,9 +189,9 @@ pub fn escape_path(path: &str) -> String {
 ///
 /// Example: `-Users-fahchen-project` -> `/Users/fahchen/project`
 pub fn unescape_path(escaped: &str) -> String {
-    if escaped.starts_with('-') {
+    if let Some(stripped) = escaped.strip_prefix('-') {
         // Leading `-` represents the root `/`
-        format!("/{}", &escaped[1..].replace('-', "/"))
+        format!("/{}", stripped.replace('-', "/"))
     } else {
         escaped.replace('-', "/")
     }
@@ -237,14 +237,12 @@ pub fn discover_transcripts(since: Option<std::time::SystemTime>) -> Vec<PathBuf
                     let file_path = file.path();
                     if file_path.extension().is_some_and(|ext| ext == "jsonl") {
                         // Check modification time if filter is set
-                        if let Some(since_time) = since {
-                            if let Ok(metadata) = file.metadata() {
-                                if let Ok(modified) = metadata.modified() {
-                                    if modified < since_time {
-                                        continue;
-                                    }
-                                }
-                            }
+                        if let Some(since_time) = since
+                            && let Ok(metadata) = file.metadata()
+                            && let Ok(modified) = metadata.modified()
+                            && modified < since_time
+                        {
+                            continue;
                         }
                         transcripts.push(file_path);
                     }
@@ -310,22 +308,22 @@ pub fn parse_transcript_line(line: &str) -> Result<Option<TranscriptEntry>, Tran
             let mut tool_ids = Vec::new();
             let mut text_content = None;
 
-            if let Some(content) = value.get("message").and_then(|m| m.get("content")) {
-                if let Some(content_array) = content.as_array() {
-                    for item in content_array {
-                        if let Some(item_type) = item.get("type").and_then(|v| v.as_str()) {
-                            if item_type == "tool_use" {
-                                if let Some(name) = item.get("name").and_then(|v| v.as_str()) {
-                                    tool_names.push(name.to_string());
-                                }
-                                if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
-                                    tool_ids.push(id.to_string());
-                                }
-                            } else if item_type == "text" {
-                                if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
-                                    text_content = Some(text.to_string());
-                                }
+            if let Some(content) = value.get("message").and_then(|m| m.get("content"))
+                && let Some(content_array) = content.as_array()
+            {
+                for item in content_array {
+                    if let Some(item_type) = item.get("type").and_then(|v| v.as_str()) {
+                        if item_type == "tool_use" {
+                            if let Some(name) = item.get("name").and_then(|v| v.as_str()) {
+                                tool_names.push(name.to_string());
                             }
+                            if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                                tool_ids.push(id.to_string());
+                            }
+                        } else if item_type == "text"
+                            && let Some(text) = item.get("text").and_then(|v| v.as_str())
+                        {
+                            text_content = Some(text.to_string());
                         }
                     }
                 }
@@ -377,20 +375,18 @@ pub fn read_transcript_meta(path: &Path) -> Result<TranscriptMeta, TranscriptErr
         }
 
         // Extract metadata from the first line that has sessionId
-        if meta.session_id.is_none() {
-            if let Some(session_id) = value.get("sessionId").and_then(|v| v.as_str()) {
-                meta.session_id = Some(session_id.to_string());
-            }
+        if meta.session_id.is_none()
+            && let Some(session_id) = value.get("sessionId").and_then(|v| v.as_str())
+        {
+            meta.session_id = Some(session_id.to_string());
         }
-        if meta.cwd.is_none() {
-            if let Some(cwd) = value.get("cwd").and_then(|v| v.as_str()) {
-                meta.cwd = Some(cwd.to_string());
-            }
+        if meta.cwd.is_none() && let Some(cwd) = value.get("cwd").and_then(|v| v.as_str()) {
+            meta.cwd = Some(cwd.to_string());
         }
-        if meta.git_branch.is_none() {
-            if let Some(branch) = value.get("gitBranch").and_then(|v| v.as_str()) {
-                meta.git_branch = Some(branch.to_string());
-            }
+        if meta.git_branch.is_none()
+            && let Some(branch) = value.get("gitBranch").and_then(|v| v.as_str())
+        {
+            meta.git_branch = Some(branch.to_string());
         }
 
         // Count messages
