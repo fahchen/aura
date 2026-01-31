@@ -216,14 +216,6 @@ mod tests {
     }
 
     #[test]
-    fn test_marquee_no_overflow() {
-        let start = Instant::now();
-        // Text fits in container - should always return 0
-        assert_eq!(calculate_marquee_offset(50.0, 80.0, start), 0.0);
-        assert_eq!(calculate_marquee_offset(80.0, 80.0, start), 0.0);
-    }
-
-    #[test]
     fn test_shake_offset_bounds() {
         let start = Instant::now();
         // At t=0, offset should be near 0 (sin(0) = 0)

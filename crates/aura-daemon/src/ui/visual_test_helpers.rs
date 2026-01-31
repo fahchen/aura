@@ -161,6 +161,9 @@ pub fn mock_sessions() -> Vec<SessionInfo> {
             stopped_at: None,
             stale_at: None,
             permission_tool: None,
+            git_branch: None,
+            message_count: None,
+            last_prompt_preview: None,
         },
         SessionInfo {
             session_id: "test-session-2".to_string(),
@@ -171,6 +174,9 @@ pub fn mock_sessions() -> Vec<SessionInfo> {
             stopped_at: None,
             stale_at: None,
             permission_tool: Some("Bash".to_string()),
+            git_branch: None,
+            message_count: None,
+            last_prompt_preview: None,
         },
     ]
 }
@@ -186,6 +192,9 @@ pub fn attention_session() -> SessionInfo {
         stopped_at: None,
         stale_at: None,
         permission_tool: Some("Bash".to_string()),
+        git_branch: None,
+        message_count: None,
+        last_prompt_preview: None,
     }
 }
 
@@ -204,6 +213,9 @@ pub fn running_session() -> SessionInfo {
         stopped_at: None,
         stale_at: None,
         permission_tool: None,
+        git_branch: None,
+        message_count: None,
+        last_prompt_preview: None,
     }
 }
 
@@ -218,5 +230,8 @@ pub fn idle_session() -> SessionInfo {
         stopped_at: Some(1705500000), // Fixed timestamp for deterministic display
         stale_at: None,
         permission_tool: None,
+        git_branch: None,
+        message_count: None,
+        last_prompt_preview: None,
     }
 }

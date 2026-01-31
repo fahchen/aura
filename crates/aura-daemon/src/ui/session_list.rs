@@ -29,7 +29,7 @@ const EVENT_PADDING_LEFT: f32 = 24.0; // Icon width (14) + gap (8) + 2 = align u
 /// Render the content of a session row (two-line vertical layout)
 ///
 /// Layout:
-/// ```
+/// ```text
 /// .session-row {
 ///   flex-direction: column;
 ///   gap: 3px;

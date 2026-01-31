@@ -1,15 +1,17 @@
-//! Aura Daemon - IPC server + HUD UI
+//! Aura Daemon - HUD UI + session tracking
 //!
-//! Receives events from hook handlers, tracks session state,
+//! Monitors AI coding sessions by watching transcript files directly,
 //! and renders the notch-flanking HUD icons.
+//!
+//! Session sources:
+//! - Transcript watcher: Discovers sessions from `~/.claude/projects/` and `~/.codex/sessions/`
+//! - IPC server: Receives real-time events from plugins (optional)
 
-use aura_daemon::{registry::SessionRegistry, server, ui};
+use aura_daemon::{registry::SessionRegistry, server, ui, watcher::TranscriptWatcher};
 use clap::Parser;
-use std::path::PathBuf;
-use std::process::Command as ProcessCommand;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 
 /// Stale detection interval
@@ -50,84 +52,8 @@ fn init_tracing(verbose: u8) {
     fmt().with_env_filter(filter).with_target(false).init();
 }
 
-/// Install CLI tools to /usr/local/bin when running from an app bundle.
-/// This mimics VS Code's behavior of installing the `code` command.
-fn install_cli_tools() {
-    let Ok(exe_path) = std::env::current_exe() else {
-        debug!("Could not determine current exe path");
-        return;
-    };
-
-    let exe_path_str = exe_path.to_string_lossy();
-
-    // Check if running from an app bundle
-    if !exe_path_str.contains(".app/Contents/MacOS") {
-        debug!("Not running from app bundle, skipping CLI install");
-        return;
-    }
-
-    // Get the directory containing the daemon binary
-    let Some(macos_dir) = exe_path.parent() else {
-        debug!("Could not determine MacOS directory");
-        return;
-    };
-
-    // Check if hook binary exists next to daemon
-    let hook_source = macos_dir.join("aura-claude-code-hook");
-    if !hook_source.exists() {
-        debug!("Hook binary not found at {:?}", hook_source);
-        return;
-    }
-
-    let target_path = PathBuf::from("/usr/local/bin/aura-claude-code-hook");
-
-    // Check if symlink already exists and points to correct location
-    if target_path.is_symlink() {
-        if let Ok(link_target) = std::fs::read_link(&target_path) {
-            if link_target == hook_source {
-                debug!("CLI tool already installed correctly");
-                return;
-            }
-            info!(
-                "CLI symlink exists but points to {:?}, updating",
-                link_target
-            );
-        }
-    } else if target_path.exists() {
-        info!("CLI path exists but is not a symlink, skipping");
-        return;
-    }
-
-    // Create symlink with admin privileges using osascript
-    info!("Installing CLI tool to /usr/local/bin");
-
-    let hook_source_str = hook_source.to_string_lossy();
-    let script = format!(
-        "do shell script \"mkdir -p /usr/local/bin && ln -sf '{}' '/usr/local/bin/aura-claude-code-hook'\" with administrator privileges",
-        hook_source_str
-    );
-
-    match ProcessCommand::new("osascript")
-        .args(["-e", &script])
-        .output()
-    {
-        Ok(output) => {
-            if output.status.success() {
-                info!("CLI tool installed successfully");
-            } else {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if stderr.contains("User canceled") || stderr.contains("(-128)") {
-                    info!("User canceled CLI installation");
-                } else {
-                    debug!("CLI installation failed: {}", stderr);
-                }
-            }
-        }
-        Err(e) => {
-            debug!("Failed to run osascript: {}", e);
-        }
-    }
-}
+/// Watcher poll interval
+const WATCHER_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 fn main() {
     let cli = Cli::parse();
@@ -140,14 +66,11 @@ fn main() {
 
     init_tracing(cli.verbose);
 
-    // Install CLI tools if running from app bundle
-    install_cli_tools();
-
     // Shared registry between IPC server and UI
     // Using std::sync::Mutex so it's accessible from both tokio and gpui threads
     let registry = Arc::new(Mutex::new(SessionRegistry::new()));
 
-    // Spawn tokio runtime in background thread for IPC server
+    // Spawn tokio runtime in background thread for IPC server and watcher
     let server_registry = Arc::clone(&registry);
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
@@ -165,6 +88,54 @@ fn main() {
                         let count = reg.len();
                         if count > 0 {
                             debug!("{count} active session(s)");
+                        }
+                    }
+                }
+            });
+
+            // Spawn watcher task
+            let watcher_registry = Arc::clone(&server_registry);
+            tokio::spawn(async move {
+                // Create watcher
+                let mut watcher = match TranscriptWatcher::new() {
+                    Ok(w) => w,
+                    Err(e) => {
+                        warn!("Failed to create transcript watcher: {}", e);
+                        return;
+                    }
+                };
+
+                if !watcher.is_watching() {
+                    info!("No transcript directories to watch");
+                    return;
+                }
+
+                info!(
+                    "Transcript watcher started, tracking {} directories",
+                    watcher.watched_dirs().len()
+                );
+
+                let mut interval = tokio::time::interval(WATCHER_POLL_INTERVAL);
+                loop {
+                    interval.tick().await;
+
+                    for event in watcher.poll() {
+                        match event {
+                            aura_daemon::watcher::WatcherEvent::SessionUpdate {
+                                session_id,
+                                cwd,
+                                agent,
+                                meta,
+                                is_active,
+                            } => {
+                                if let Ok(mut reg) = watcher_registry.lock() {
+                                    reg.update_from_watcher(&session_id, &cwd, agent, meta, None, is_active);
+                                }
+                            }
+                            aura_daemon::watcher::WatcherEvent::SessionRemoved { session_id } => {
+                                // Just log - let stale detection handle cleanup
+                                debug!("Session file removed: {}", session_id);
+                            }
                         }
                     }
                 }

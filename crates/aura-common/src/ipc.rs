@@ -58,6 +58,15 @@ pub struct SessionInfo {
     /// Tool requesting permission
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_tool: Option<String>,
+    /// Git branch from transcript
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+    /// Total message count in transcript
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_count: Option<u32>,
+    /// Preview of last user prompt
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_prompt_preview: Option<String>,
 }
 
 /// A currently running tool
@@ -156,6 +165,9 @@ mod tests {
             stopped_at: None,
             stale_at: None,
             permission_tool: None,
+            git_branch: None,
+            message_count: None,
+            last_prompt_preview: None,
         };
 
         let json = serde_json::to_string(&info).unwrap();

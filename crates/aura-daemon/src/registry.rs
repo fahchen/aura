@@ -1,7 +1,10 @@
 //! Session registry - tracks active sessions and their state
 
-use aura_common::{AgentEvent, AgentType, RunningTool, SessionInfo, SessionState};
+use aura_common::{
+    transcript::TranscriptMeta, AgentEvent, AgentType, RunningTool, SessionInfo, SessionState,
+};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 use tracing::{debug, info, trace};
 
@@ -48,6 +51,12 @@ pub struct Session {
     pub stale_at: Option<Instant>,
     /// Tool requesting permission (from NeedsAttention message)
     pub permission_tool: Option<String>,
+    /// Path to the transcript file (if discovered via watcher)
+    pub transcript_path: Option<PathBuf>,
+    /// Transcript metadata from last parse
+    pub transcript_meta: Option<TranscriptMeta>,
+    /// Last time we checked the transcript file
+    pub last_file_check: Option<Instant>,
 }
 
 impl Session {
@@ -64,6 +73,9 @@ impl Session {
             stopped_at: None,
             stale_at: None,
             permission_tool: None,
+            transcript_path: None,
+            transcript_meta: None,
+            last_file_check: None,
         }
     }
 
@@ -107,6 +119,15 @@ impl Session {
             stopped_at: self.stopped_at.map(instant_to_unix_timestamp),
             stale_at: self.stale_at.map(instant_to_unix_timestamp),
             permission_tool: self.permission_tool.clone(),
+            git_branch: self
+                .transcript_meta
+                .as_ref()
+                .and_then(|m| m.git_branch.clone()),
+            message_count: self.transcript_meta.as_ref().map(|m| m.message_count),
+            last_prompt_preview: self
+                .transcript_meta
+                .as_ref()
+                .and_then(|m| m.last_user_prompt.clone()),
         }
     }
 }
@@ -279,6 +300,65 @@ impl SessionRegistry {
     pub fn remove_session(&mut self, session_id: &str) {
         info!(%session_id, "session removed via UI");
         self.sessions.remove(session_id);
+    }
+
+    /// Update session from watcher event.
+    ///
+    /// Creates a new session if it doesn't exist, or updates existing session's
+    /// transcript metadata. State is determined by `is_active`:
+    /// - `is_active=true`: File was modified recently → Running state
+    /// - `is_active=false`: File is stale → Idle state
+    pub fn update_from_watcher(
+        &mut self,
+        session_id: &str,
+        cwd: &str,
+        agent: AgentType,
+        meta: TranscriptMeta,
+        transcript_path: Option<PathBuf>,
+        is_active: bool,
+    ) {
+        let now = Instant::now();
+
+        if let Some(session) = self.sessions.get_mut(session_id) {
+            // Existing session: update transcript metadata and state
+            session.transcript_meta = Some(meta);
+            session.last_file_check = Some(now);
+            if transcript_path.is_some() {
+                session.transcript_path = transcript_path;
+            }
+
+            // Update state based on activity
+            if is_active {
+                if session.state == SessionState::Idle || session.state == SessionState::Stale {
+                    session.state = SessionState::Running;
+                    session.clear_timestamps();
+                }
+                session.touch();
+            } else if session.state == SessionState::Running {
+                // File stopped being modified → mark as Idle
+                session.state = SessionState::Idle;
+                session.stopped_at = Some(now);
+            }
+
+            trace!(%session_id, %is_active, "updated session from watcher");
+        } else {
+            // New session discovered via watcher
+            let mut session = Session::new(session_id.to_string(), cwd.to_string(), agent);
+
+            if is_active {
+                session.state = SessionState::Running;
+            } else {
+                session.state = SessionState::Idle;
+                session.stopped_at = Some(now);
+            }
+
+            session.transcript_meta = Some(meta);
+            session.transcript_path = transcript_path;
+            session.last_file_check = Some(now);
+
+            info!(%session_id, %cwd, %is_active, "session discovered via watcher");
+            self.sessions.insert(session_id.to_string(), session);
+        }
     }
 
     /// Get session count
