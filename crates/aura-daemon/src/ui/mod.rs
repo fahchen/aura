@@ -33,8 +33,8 @@ use assets::Assets;
 use aura_common::{SessionInfo, SessionState};
 use crate::registry::SessionRegistry;
 use gpui::{
-    actions, div, point, px, size, App, AppContext, Application, Bounds, Context, Entity,
-    InteractiveElement, IntoElement, Menu, MenuItem, ParentElement, Pixels, Point, Render,
+    actions, div, point, px, size, uniform_list, App, AppContext, Application, Bounds, Context,
+    Entity, InteractiveElement, IntoElement, Menu, MenuItem, ParentElement, Pixels, Point, Render,
     SharedString, StatefulInteractiveElement, Styled, Window, WindowBackgroundAppearance,
     WindowBounds, WindowHandle, WindowKind, WindowOptions,
     prelude::FluentBuilder,
@@ -46,7 +46,10 @@ use session_list::{
 use indicator::{HEIGHT as COLLAPSED_HEIGHT, WIDTH as COLLAPSED_WIDTH};
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use std::time::Instant;
 
 
@@ -55,6 +58,7 @@ actions!(aura, [Quit, SetThemeSystem, SetThemeLiquidDark, SetThemeLiquidLight, S
 
 /// Gap between indicator and session list windows
 const WINDOW_GAP: f32 = 4.0;
+
 
 
 /// Shared HUD state between indicator and session list windows
@@ -79,37 +83,16 @@ struct SharedHudState {
     theme_style: theme::ThemeStyle,
     /// Whether the system is currently in dark mode (detected from OS)
     system_is_dark: bool,
+    /// Whether registry data changed and needs refresh
+    registry_dirty: Arc<AtomicBool>,
 }
-
-/// Grace period to keep showing idle sessions (5 minutes)
-const IDLE_GRACE_PERIOD_SECS: u64 = 300;
 
 impl SharedHudState {
     /// Refresh sessions from registry
-    /// - Always shows active sessions (Running, Attention, Waiting, Compacting)
-    /// - Shows Idle sessions for a grace period after they stop
-    /// - Hides Stale sessions
+    /// - Shows all sessions (including Idle and Stale)
     fn refresh_from_registry(&mut self) {
         if let Ok(registry) = self.registry.lock() {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-
-            self.sessions = registry
-                .get_all()
-                .into_iter()
-                .filter(|s| match s.state {
-                    SessionState::Stale => false,
-                    SessionState::Idle => {
-                        // Show idle sessions within grace period
-                        s.stopped_at
-                            .map(|stopped| now.saturating_sub(stopped) < IDLE_GRACE_PERIOD_SECS)
-                            .unwrap_or(false)
-                    }
-                    _ => true,
-                })
-                .collect();
+            self.sessions = registry.get_all();
         }
     }
 
@@ -143,7 +126,9 @@ impl Render for IndicatorView {
         let appearance = window.appearance();
         self.state.update(cx, |state, _cx| {
             state.update_system_appearance(appearance);
-            state.refresh_from_registry();
+            if state.registry_dirty.swap(false, Ordering::Relaxed) {
+                state.refresh_from_registry();
+            }
         });
 
         let hud_state = self.state.read(cx);
@@ -195,17 +180,14 @@ impl Render for IndicatorView {
                         }
                         1 => {
                             // Single-click: toggle session list
+                            state_for_click.update(app, |state, _cx| {
+                                state.registry_dirty.store(true, Ordering::Relaxed);
+                            });
                             let hud_state = state_for_click.read(app);
-                            let has_sessions = !hud_state.sessions.is_empty();
                             let was_visible = hud_state.session_list_visible;
                             let window_handle = hud_state.session_list_window;
 
-                            // Only allow opening if there are sessions
-                            if !was_visible && !has_sessions {
-                                return; // No sessions, don't open
-                            }
-
-                            let should_open = !was_visible && window_handle.is_none();
+                            let should_open = !was_visible;
                             let should_close = was_visible && window_handle.is_some();
 
                             // NOTE: When the session list window is moved and then closed, gpui logs
@@ -217,22 +199,35 @@ impl Render for IndicatorView {
                             // - This is benign: the window closes correctly, no functional impact
                             // - Fix requires changes to gpui's callback cleanup logic
                             if should_close {
-                                // Remove window FIRST, before state update
                                 let handle = window_handle.unwrap();
                                 let _ = handle.update(app, |_view, window, _cx| {
                                     window.remove_window();
                                 });
 
-                                // Then update state (window is already gone)
                                 state_for_click.update(app, |state, _cx| {
                                     state.session_list_visible = false;
                                     state.session_list_window = None;
                                 });
                             } else if should_open {
+                                let indicator_origin = window.bounds().origin;
+                                let session_list_origin = point(
+                                    indicator_origin.x - px((EXPANDED_WIDTH - COLLAPSED_WIDTH) / 2.0),
+                                    indicator_origin.y + px(COLLAPSED_HEIGHT + WINDOW_GAP),
+                                );
+                                let session_count = hud_state.sessions.len().max(1).min(MAX_SESSIONS);
+                                let height = calculate_expanded_height(session_count);
+
                                 state_for_click.update(app, |state, _cx| {
                                     state.session_list_visible = true;
+                                    state.session_list_origin = session_list_origin;
                                 });
-                                open_session_list_window_sync(app, state_for_click.clone());
+                                if window_handle.is_none() {
+                                    open_session_list_window_sync(app, state_for_click.clone());
+                                } else if let Some(handle) = window_handle {
+                                    let _ = handle.update(app, |_view, window, _cx| {
+                                        window.resize(size(px(EXPANDED_WIDTH), px(height)));
+                                    });
+                                }
                             }
                         }
                         _ => {
@@ -363,6 +358,7 @@ impl SessionListView {
                                 if let Ok(mut registry) = state.registry.lock() {
                                     registry.remove_session(&session_id_for_remove);
                                 }
+                                state.registry_dirty.store(true, Ordering::Relaxed);
                             });
                         }),
                 )
@@ -423,7 +419,8 @@ impl Render for SessionListView {
         // Check visibility FIRST - if not visible, return empty (window closing handled by click handler)
         let is_visible = self.state.read(cx).session_list_visible;
         if !is_visible {
-            return div().size_full().into_any_element();
+            window.resize(size(px(1.0), px(1.0)));
+            return div().size_full().opacity(0.0).into_any_element();
         }
 
         // Request continuous animation frames (only for visible windows)
@@ -439,37 +436,86 @@ impl Render for SessionListView {
 
         let hud_state = self.state.read(cx);
         let sessions = &hud_state.sessions;
+        let total_count = sessions.len();
         let animation_start = hud_state.animation_start;
         let theme_colors = hud_state.theme_colors();
 
         // Resize window if session count changed
         // Include removing sessions in count to prevent height jump during exit animation
-        let visible_count = (sessions.len() + self.removing.len()).min(MAX_SESSIONS);
+        let visible_count = (total_count + self.removing.len()).min(MAX_SESSIONS);
         if visible_count != self.last_session_count && visible_count > 0 {
             self.last_session_count = visible_count;
             let height = calculate_expanded_height(visible_count);
             window.resize(size(px(EXPANDED_WIDTH), px(height)));
         }
 
-        // Handle empty sessions case - close the window
+        // Handle empty sessions case - show placeholder
         if sessions.is_empty() {
-            // Save position and close window
-            let current_origin = window.bounds().origin;
-            self.state.update(cx, |state, _cx| {
-                state.session_list_origin = current_origin;
-                state.session_list_visible = false;
-                state.session_list_window = None;
-            });
-            window.remove_window();
-            return div().size_full().into_any_element();
+            let height = calculate_expanded_height(1);
+            window.resize(size(px(EXPANDED_WIDTH), px(height)));
+            return div()
+                .id("session-list-container")
+                .size_full()
+                .relative()
+                .rounded(px(theme::WINDOW_RADIUS))
+                .overflow_hidden()
+                .bg(theme_colors.container_bg)
+                .border_1()
+                .border_color(theme_colors.border)
+                .when(theme_colors.use_shadow, |this| this.shadow_md())
+                .child(glass::render_container_highlight(
+                    theme::WINDOW_RADIUS,
+                    &theme_colors,
+                ))
+                .child(
+                    div()
+                        .relative()
+                        .size_full()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .id("session-list-header")
+                                .w_full()
+                                .h(px(28.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .font_family("Maple Mono NF CN")
+                                .text_size(px(11.0))
+                                .font_weight(gpui::FontWeight::NORMAL)
+                                .text_color(theme_colors.text_header)
+                                .child("0 sessions".to_string()),
+                        )
+                        .child(
+                            div()
+                                .id("session-list-content")
+                                .p(px(10.0))
+                                .flex_1()
+                                .rounded(px(theme::WINDOW_RADIUS))
+                                .bg(theme_colors.content_bg)
+                                .border_t_1()
+                                .border_color(theme_colors.content_highlight)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .font_family("Maple Mono NF CN")
+                                .text_size(px(11.0))
+                                .text_color(theme_colors.text_secondary)
+                                .child("No active sessions".to_string()),
+                        ),
+                )
+                .into_any_element();
         }
 
         // Calculate animation state
         let (tool_index, fade_progress) =
             calculate_animation_state(animation_start, hud_state.animation_seed);
 
-        let sessions_for_render: Vec<_> = sessions.iter().take(MAX_SESSIONS).cloned().collect();
-        let session_count = sessions_for_render.len();
+        let sessions_for_render: Vec<_> = sessions.iter().cloned().collect();
+        let session_count = total_count;
+        let theme_colors = theme_colors.clone();
+        let list_theme_colors = theme_colors.clone();
 
         // Build current session IDs set
         let current_ids: std::collections::HashSet<_> = sessions_for_render
@@ -508,13 +554,27 @@ impl Render for SessionListView {
             self.session_cache.remove(id);
         }
 
-        // Build session rows (needs mutable self for appeared_at tracking)
-        let session_rows: Vec<_> = sessions_for_render
-            .iter()
-            .map(|session| {
-                self.render_session_row(session, tool_index, fade_progress, animation_start, &theme_colors, cx)
-            })
-            .collect();
+        let session_list = uniform_list(
+            "sessions",
+            sessions_for_render.len(),
+            cx.processor(move |this, range, _window, cx| {
+                let mut items = Vec::new();
+                for ix in range {
+                    if let Some(session) = sessions_for_render.get(ix) {
+                        items.push(this.render_session_row(
+                            session,
+                            tool_index,
+                            fade_progress,
+                            animation_start,
+                            &list_theme_colors,
+                            cx,
+                        ));
+                    }
+                }
+                items
+            }),
+        )
+        .h_full();
 
         // Build removing session rows (exit animation)
         let removing_rows: Vec<_> = self
@@ -572,6 +632,7 @@ impl Render for SessionListView {
                     // Content: session rows below header
                     .child(
                         div()
+                            .id("session-list-content")
                             .p(px(10.0))
                             .flex_1()
                             .rounded(px(theme::WINDOW_RADIUS))
@@ -581,7 +642,9 @@ impl Render for SessionListView {
                             .flex()
                             .flex_col()
                             .gap(px(ROW_GAP))
-                            .children(session_rows)
+                            .overflow_y_scroll()
+                            .scrollbar_width(px(0.0))
+                            .child(session_list)
                             .children(removing_rows),
                     ),
             )
@@ -643,7 +706,7 @@ fn open_session_list_window_sync(app: &mut App, state: Entity<SharedHudState>) {
 ///
 /// This function blocks and runs the gpui event loop.
 /// Call from main thread only.
-pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>) {
+pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<AtomicBool>) {
     Application::new().with_assets(Assets).run(|app: &mut App| {
         // Register embedded Maple Mono font for consistent marquee rendering
         let font_data = include_bytes!("../../assets/fonts/MapleMono-NF-CN-Regular.ttf");
@@ -728,6 +791,7 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>) {
             indicator_window: None, // Will be set after window creation
             theme_style: theme::ThemeStyle::System,
             system_is_dark: initial_system_is_dark,
+            registry_dirty,
         });
 
         // Register theme action handlers
