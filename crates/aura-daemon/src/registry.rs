@@ -19,6 +19,14 @@ fn instant_to_unix_timestamp(instant: Instant) -> u64 {
         .as_secs()
 }
 
+/// Convert a SystemTime to an Instant anchored to now (best-effort).
+fn system_time_to_instant(time: SystemTime) -> Instant {
+    let now_system = SystemTime::now();
+    let now_instant = Instant::now();
+    let elapsed = now_system.duration_since(time).unwrap_or(Duration::ZERO);
+    now_instant.checked_sub(elapsed).unwrap_or(now_instant)
+}
+
 /// Minimum duration to keep completed tools visible
 const MIN_TOOL_DISPLAY: Duration = Duration::from_secs(1);
 
@@ -167,6 +175,7 @@ impl SessionRegistry {
                 info!(%session_id, %cwd, ?agent, "session started");
                 self.sessions
                     .insert(session_id.clone(), Session::new(session_id, cwd, agent));
+                debug!("{} total session(s)", self.sessions.len());
             }
 
             AgentEvent::Activity { session_id, cwd } => {
@@ -190,6 +199,7 @@ impl SessionRegistry {
                 self.update_session(&session_id, &cwd, |session| {
                     session.state = SessionState::Running;
                     session.clear_timestamps();
+                    session.permission_tool = None;
                     session
                         .running_tools
                         .push(RunningTool { tool_id, tool_name, tool_label });
@@ -203,6 +213,11 @@ impl SessionRegistry {
             } => {
                 debug!(%session_id, %tool_id, "tool completed");
                 self.update_session(&session_id, &cwd, |session| {
+                    if session.state != SessionState::Running {
+                        session.state = SessionState::Running;
+                        session.clear_timestamps();
+                        session.permission_tool = None;
+                    }
                     if let Some(pos) =
                         session.running_tools.iter().position(|t| t.tool_id == tool_id)
                     {
@@ -259,6 +274,7 @@ impl SessionRegistry {
             AgentEvent::SessionEnded { session_id } => {
                 info!(%session_id, "session ended");
                 self.sessions.remove(&session_id);
+                debug!("{} total session(s)", self.sessions.len());
             }
 
             AgentEvent::SessionNameUpdated { session_id, name } => {
@@ -274,6 +290,7 @@ impl SessionRegistry {
     /// Mark sessions as stale if no activity for the given duration
     pub fn mark_stale(&mut self, timeout: Duration) {
         let now = Instant::now();
+        let mut remove_ids = Vec::new();
         for session in self.sessions.values_mut() {
             // Clean up expired recent tools
             session.recent_tools.retain(|t| t.expires_at > now);
@@ -287,7 +304,17 @@ impl SessionRegistry {
                     session.state = SessionState::Stale;
                     session.stale_at = Some(Instant::now());
                 }
+
+                // Codex sessions do not emit explicit end events reliably.
+                // Remove them once they go stale to keep the list accurate.
+                if session.agent == AgentType::Codex {
+                    remove_ids.push(session.session_id.clone());
+                }
             }
+        }
+
+        for session_id in remove_ids {
+            self.sessions.remove(&session_id);
         }
     }
 
@@ -316,8 +343,10 @@ impl SessionRegistry {
         meta: TranscriptMeta,
         transcript_path: Option<PathBuf>,
         is_active: bool,
+        last_event_time: Option<SystemTime>,
     ) {
         let now = Instant::now();
+        let stopped_at = last_event_time.map(system_time_to_instant).or(Some(now));
 
         if let Some(session) = self.sessions.get_mut(session_id) {
             // Existing session: update transcript metadata and state
@@ -325,6 +354,10 @@ impl SessionRegistry {
             session.last_file_check = Some(now);
             if transcript_path.is_some() {
                 session.transcript_path = transcript_path;
+            }
+            if let Some(name) = session.transcript_meta.as_ref().and_then(|m| m.session_name.clone())
+            {
+                session.name = Some(name);
             }
 
             // Update state based on activity
@@ -334,10 +367,12 @@ impl SessionRegistry {
                     session.clear_timestamps();
                 }
                 session.touch();
-            } else if session.state == SessionState::Running {
-                // File stopped being modified → mark as Idle
-                session.state = SessionState::Idle;
-                session.stopped_at = Some(now);
+            } else {
+                // File stopped being modified → mark as Idle (use real last activity time)
+                if session.state == SessionState::Running {
+                    session.state = SessionState::Idle;
+                }
+                session.stopped_at = stopped_at;
             }
 
             trace!(%session_id, %is_active, "updated session from watcher");
@@ -349,14 +384,44 @@ impl SessionRegistry {
                 session.state = SessionState::Running;
             } else {
                 session.state = SessionState::Idle;
-                session.stopped_at = Some(now);
+                session.stopped_at = stopped_at;
             }
 
             session.transcript_meta = Some(meta);
             session.transcript_path = transcript_path;
             session.last_file_check = Some(now);
+            if let Some(name) = session.transcript_meta.as_ref().and_then(|m| m.session_name.clone())
+            {
+                session.name = Some(name);
+            }
 
             info!(%session_id, %cwd, %is_active, "session discovered via watcher");
+            self.sessions.insert(session_id.to_string(), session);
+        }
+    }
+
+    /// Update session activity from Codex history file.
+    pub fn update_activity_from_history(
+        &mut self,
+        session_id: &str,
+        last_event_time: SystemTime,
+    ) {
+        let last_activity = system_time_to_instant(last_event_time);
+
+        if let Some(session) = self.sessions.get_mut(session_id) {
+            if session.state == SessionState::Idle || session.state == SessionState::Stale {
+                session.state = SessionState::Running;
+                session.clear_timestamps();
+            }
+            session.last_activity = last_activity;
+            trace!(%session_id, "updated session activity from history");
+        } else {
+            let mut session = Session::new(session_id.to_string(), String::new(), AgentType::Codex);
+            session.state = SessionState::Running;
+            session.last_activity = last_activity;
+            session.stopped_at = None;
+            session.stale_at = None;
+            info!(%session_id, "session discovered via history");
             self.sessions.insert(session_id.to_string(), session);
         }
     }

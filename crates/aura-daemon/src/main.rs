@@ -5,13 +5,15 @@
 //!
 //! Session sources:
 //! - Transcript watcher: Discovers sessions from `~/.claude/projects/` and `~/.codex/sessions/`
-//! - IPC server: Receives real-time events from plugins (optional)
 
-use aura_daemon::{registry::SessionRegistry, server, ui, watcher::TranscriptWatcher};
+use aura_daemon::{registry::SessionRegistry, ui, watcher::TranscriptWatcher};
 use clap::Parser;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use std::time::Duration;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 
 /// Stale detection interval
@@ -66,35 +68,35 @@ fn main() {
 
     init_tracing(cli.verbose);
 
-    // Shared registry between IPC server and UI
+    // Shared registry between watcher and UI
     // Using std::sync::Mutex so it's accessible from both tokio and gpui threads
     let registry = Arc::new(Mutex::new(SessionRegistry::new()));
+    let registry_dirty = Arc::new(AtomicBool::new(true));
 
-    // Spawn tokio runtime in background thread for IPC server and watcher
+    // Spawn tokio runtime in background thread for watcher
     let server_registry = Arc::clone(&registry);
+    let server_dirty = Arc::clone(&registry_dirty);
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
         rt.block_on(async move {
             // Spawn stale detection task
             let stale_registry = Arc::clone(&server_registry);
+            let stale_dirty = Arc::clone(&server_dirty);
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(STALE_CHECK_INTERVAL);
                 loop {
                     interval.tick().await;
                     if let Ok(mut reg) = stale_registry.lock() {
                         reg.mark_stale(STALE_TIMEOUT);
+                        stale_dirty.store(true, Ordering::Relaxed);
 
-                        // Debug: log session count
-                        let count = reg.len();
-                        if count > 0 {
-                            debug!("{count} active session(s)");
-                        }
                     }
                 }
             });
 
             // Spawn watcher task
             let watcher_registry = Arc::clone(&server_registry);
+            let watcher_dirty = Arc::clone(&server_dirty);
             tokio::spawn(async move {
                 // Create watcher
                 let mut watcher = match TranscriptWatcher::new() {
@@ -127,6 +129,7 @@ fn main() {
                                 agent,
                                 meta,
                                 is_active,
+                                last_event_time,
                             } => {
                                 if let Ok(mut reg) = watcher_registry.lock() {
                                     reg.update_from_watcher(
@@ -136,25 +139,33 @@ fn main() {
                                         *meta,
                                         None,
                                         is_active,
+                                        last_event_time,
                                     );
+                                    watcher_dirty.store(true, Ordering::Relaxed);
                                 }
                             }
                             aura_daemon::watcher::WatcherEvent::SessionRemoved { session_id } => {
                                 // Just log - let stale detection handle cleanup
                                 debug!("Session file removed: {}", session_id);
                             }
+                            aura_daemon::watcher::WatcherEvent::AgentEvent { event } => {
+                                debug!(?event, "agent event");
+                                if let Ok(mut reg) = watcher_registry.lock() {
+                                    reg.process_event(event);
+                                    watcher_dirty.store(true, Ordering::Relaxed);
+                                }
+                            }
                         }
                     }
                 }
             });
 
-            // Run IPC server
-            if let Err(e) = server::run(server_registry).await {
-                error!("server error: {e}");
-            }
+            // Keep the runtime alive now that IPC is removed
+            std::future::pending::<()>().await;
+
         });
     });
 
     // Run gpui on main thread (blocks)
-    ui::run_hud(registry);
+    ui::run_hud(registry, registry_dirty);
 }
