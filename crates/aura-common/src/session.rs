@@ -2,6 +2,47 @@
 
 use serde::{Deserialize, Serialize};
 
+/// A currently running tool
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunningTool {
+    pub tool_id: String,
+    pub tool_name: String,
+    pub tool_label: Option<String>,
+}
+
+/// Session information for UI rendering
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionInfo {
+    pub session_id: String,
+    pub cwd: String,
+    pub state: SessionState,
+    pub running_tools: Vec<RunningTool>,
+    /// Custom session name (if set by user)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Unix timestamp when stopped
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_at: Option<u64>,
+    /// Unix timestamp when became stale
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale_at: Option<u64>,
+    /// Tool requesting permission
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_tool: Option<String>,
+    /// Git branch from transcript
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+    /// Total message count in transcript
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_count: Option<u32>,
+    /// Preview of last user prompt
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_prompt_preview: Option<String>,
+    /// Recent activity labels (most recent last)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_activity: Vec<String>,
+}
+
 /// Placeholder texts displayed when agent is thinking/processing
 pub const PLACEHOLDER_TEXTS: &[&str] = &[
     "thinking...",

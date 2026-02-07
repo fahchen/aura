@@ -1,9 +1,9 @@
 //! Visual regression tests for HUD UI components
 //!
 //! These tests use `VisualTestAppContext` for real Metal rendering with screenshot capture.
-//! Run with: `cargo test -p aura-daemon -- --ignored --test-threads=1`
+//! Run with: `cargo test -p aura -- --ignored --test-threads=1`
 //!
-//! To update baselines: `UPDATE_BASELINES=1 cargo test -p aura-daemon -- --ignored --test-threads=1`
+//! To update baselines: `UPDATE_BASELINES=1 cargo test -p aura -- --ignored --test-threads=1`
 
 #[cfg(test)]
 mod tests {
@@ -42,8 +42,8 @@ mod tests {
     // 1. macOS main thread (Metal rendering)
     // 2. Sequential execution (--test-threads=1)
     //
-    // Run with: cargo test -p aura-daemon -- --ignored --test-threads=1
-    // Update baselines: UPDATE_BASELINES=1 cargo test -p aura-daemon -- --ignored --test-threads=1
+    // Run with: cargo test -p aura -- --ignored --test-threads=1
+    // Update baselines: UPDATE_BASELINES=1 cargo test -p aura -- --ignored --test-threads=1
 
     /// Test indicator rendering with no sessions (Panda icon, dim state)
     #[test]

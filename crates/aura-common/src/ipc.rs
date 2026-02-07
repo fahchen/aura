@@ -1,182 +1,205 @@
-//! IPC message protocol between adapters and daemon
+//! IPC message types for Unix socket communication
+//!
+//! Used by aura-hook (Claude Code hooks → socket) and the daemon's socket server.
 
-use crate::{AgentEvent, SessionState};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
-/// Socket name for IPC communication
-pub const SOCKET_NAME: &str = "aura.sock";
+use crate::{AgentEvent, AgentType};
 
-/// Get the socket path for IPC communication
-///
-/// Uses XDG_RUNTIME_DIR if available, falls back to /tmp
-pub fn socket_path() -> PathBuf {
-    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir());
-    runtime_dir.join(SOCKET_NAME)
-}
-
-/// Message from adapter to daemon
+/// Message sent over the Unix socket (newline-delimited JSON).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "msg", rename_all = "snake_case")]
+#[serde(tag = "event", rename_all = "snake_case")]
 pub enum IpcMessage {
-    /// Agent event (generic, from any adapter)
-    Event(AgentEvent),
-    /// Ping to check if daemon is alive
-    Ping,
+    SessionStarted {
+        session_id: String,
+        cwd: String,
+        agent: AgentType,
+    },
+    Activity {
+        session_id: String,
+        cwd: String,
+    },
+    ToolStarted {
+        session_id: String,
+        cwd: String,
+        tool_id: String,
+        tool_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_label: Option<String>,
+    },
+    ToolCompleted {
+        session_id: String,
+        cwd: String,
+        tool_id: String,
+    },
+    NeedsAttention {
+        session_id: String,
+        cwd: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    WaitingForInput {
+        session_id: String,
+        cwd: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    Compacting {
+        session_id: String,
+        cwd: String,
+    },
+    Idle {
+        session_id: String,
+        cwd: String,
+    },
+    SessionEnded {
+        session_id: String,
+    },
+    SessionNameUpdated {
+        session_id: String,
+        name: String,
+    },
 }
 
-/// Response from daemon to adapter
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "msg", rename_all = "snake_case")]
-pub enum IpcResponse {
-    /// Acknowledgment
-    Ok,
-    /// Pong response to ping
-    Pong,
-    /// Error message
-    Error { message: String },
+impl From<IpcMessage> for AgentEvent {
+    fn from(msg: IpcMessage) -> Self {
+        match msg {
+            IpcMessage::SessionStarted {
+                session_id,
+                cwd,
+                agent,
+            } => AgentEvent::SessionStarted {
+                session_id,
+                cwd,
+                agent,
+            },
+            IpcMessage::Activity { session_id, cwd } => {
+                AgentEvent::Activity { session_id, cwd }
+            }
+            IpcMessage::ToolStarted {
+                session_id,
+                cwd,
+                tool_id,
+                tool_name,
+                tool_label,
+            } => AgentEvent::ToolStarted {
+                session_id,
+                cwd,
+                tool_id,
+                tool_name,
+                tool_label,
+            },
+            IpcMessage::ToolCompleted {
+                session_id,
+                cwd,
+                tool_id,
+            } => AgentEvent::ToolCompleted {
+                session_id,
+                cwd,
+                tool_id,
+            },
+            IpcMessage::NeedsAttention {
+                session_id,
+                cwd,
+                message,
+            } => AgentEvent::NeedsAttention {
+                session_id,
+                cwd,
+                message,
+            },
+            IpcMessage::WaitingForInput {
+                session_id,
+                cwd,
+                message,
+            } => AgentEvent::WaitingForInput {
+                session_id,
+                cwd,
+                message,
+            },
+            IpcMessage::Compacting { session_id, cwd } => {
+                AgentEvent::Compacting { session_id, cwd }
+            }
+            IpcMessage::Idle { session_id, cwd } => AgentEvent::Idle { session_id, cwd },
+            IpcMessage::SessionEnded { session_id } => {
+                AgentEvent::SessionEnded { session_id }
+            }
+            IpcMessage::SessionNameUpdated { session_id, name } => {
+                AgentEvent::SessionNameUpdated { session_id, name }
+            }
+        }
+    }
 }
 
-/// Session information for IPC
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionInfo {
-    pub session_id: String,
-    pub cwd: String,
-    pub state: SessionState,
-    pub running_tools: Vec<RunningTool>,
-    /// Custom session name (if set by user)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    /// Unix timestamp when stopped
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stopped_at: Option<u64>,
-    /// Unix timestamp when became stale
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stale_at: Option<u64>,
-    /// Tool requesting permission
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub permission_tool: Option<String>,
-    /// Git branch from transcript
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub git_branch: Option<String>,
-    /// Total message count in transcript
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message_count: Option<u32>,
-    /// Preview of last user prompt
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_prompt_preview: Option<String>,
-}
-
-/// A currently running tool
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RunningTool {
-    pub tool_id: String,
-    pub tool_name: String,
-    pub tool_label: Option<String>,
+/// Default socket path for the daemon.
+pub fn socket_path() -> std::path::PathBuf {
+    std::env::temp_dir().join("aura.sock")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AgentType;
 
     #[test]
-    fn socket_path_ends_with_socket_name() {
-        let path = socket_path();
-        assert!(path.ends_with(SOCKET_NAME));
-    }
-
-    #[test]
-    fn ipc_message_event_serialization() {
-        let event = AgentEvent::SessionStarted {
-            session_id: "abc123".into(),
+    fn ipc_message_roundtrip() {
+        let msg = IpcMessage::ToolStarted {
+            session_id: "s1".into(),
             cwd: "/tmp".into(),
-            agent: AgentType::ClaudeCode,
+            tool_id: "t1".into(),
+            tool_name: "Bash".into(),
+            tool_label: Some("npm test".into()),
         };
-        let msg = IpcMessage::Event(event);
+
         let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains("\"msg\":\"event\""));
-        assert!(json.contains("\"session_id\":\"abc123\""));
+        assert!(json.contains("\"event\":\"tool_started\""));
 
         let parsed: IpcMessage = serde_json::from_str(&json).unwrap();
-        match parsed {
-            IpcMessage::Event(e) => assert_eq!(e.session_id(), "abc123"),
-            _ => panic!("Expected Event"),
+        let event: AgentEvent = parsed.into();
+        assert_eq!(event.session_id(), "s1");
+    }
+
+    #[test]
+    fn ipc_message_session_started() {
+        let json = r#"{"event":"session_started","session_id":"abc","cwd":"/path","agent":"claude_code"}"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        let event: AgentEvent = msg.into();
+        assert_eq!(event.session_id(), "abc");
+        assert_eq!(event.cwd(), "/path");
+    }
+
+    #[test]
+    fn ipc_message_session_ended() {
+        let json = r#"{"event":"session_ended","session_id":"abc"}"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        let event: AgentEvent = msg.into();
+        assert_eq!(event.session_id(), "abc");
+    }
+
+    #[test]
+    fn ipc_message_needs_attention() {
+        let json = r#"{"event":"needs_attention","session_id":"abc","cwd":"/path","message":"Permission needed"}"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        let event: AgentEvent = msg.into();
+        assert_eq!(event.session_id(), "abc");
+    }
+
+    #[test]
+    fn ipc_message_all_variants() {
+        let messages = vec![
+            r#"{"event":"session_started","session_id":"s1","cwd":"/tmp","agent":"claude_code"}"#,
+            r#"{"event":"activity","session_id":"s1","cwd":"/tmp"}"#,
+            r#"{"event":"tool_started","session_id":"s1","cwd":"/tmp","tool_id":"t1","tool_name":"Read"}"#,
+            r#"{"event":"tool_completed","session_id":"s1","cwd":"/tmp","tool_id":"t1"}"#,
+            r#"{"event":"needs_attention","session_id":"s1","cwd":"/tmp"}"#,
+            r#"{"event":"waiting_for_input","session_id":"s1","cwd":"/tmp"}"#,
+            r#"{"event":"compacting","session_id":"s1","cwd":"/tmp"}"#,
+            r#"{"event":"idle","session_id":"s1","cwd":"/tmp"}"#,
+            r#"{"event":"session_ended","session_id":"s1"}"#,
+            r#"{"event":"session_name_updated","session_id":"s1","name":"fix login"}"#,
+        ];
+
+        for json in messages {
+            let msg: IpcMessage = serde_json::from_str(json).unwrap();
+            let _event: AgentEvent = msg.into();
         }
-    }
-
-    #[test]
-    fn ipc_message_ping_serialization() {
-        let msg = IpcMessage::Ping;
-        let json = serde_json::to_string(&msg).unwrap();
-        assert_eq!(json, "{\"msg\":\"ping\"}");
-
-        let parsed: IpcMessage = serde_json::from_str(&json).unwrap();
-        assert!(matches!(parsed, IpcMessage::Ping));
-    }
-
-    #[test]
-    fn ipc_response_ok_serialization() {
-        let resp = IpcResponse::Ok;
-        let json = serde_json::to_string(&resp).unwrap();
-        assert_eq!(json, "{\"msg\":\"ok\"}");
-
-        let parsed: IpcResponse = serde_json::from_str(&json).unwrap();
-        assert!(matches!(parsed, IpcResponse::Ok));
-    }
-
-    #[test]
-    fn ipc_response_pong_serialization() {
-        let resp = IpcResponse::Pong;
-        let json = serde_json::to_string(&resp).unwrap();
-        assert_eq!(json, "{\"msg\":\"pong\"}");
-    }
-
-    #[test]
-    fn ipc_response_error_serialization() {
-        let resp = IpcResponse::Error {
-            message: "test error".into(),
-        };
-        let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("\"msg\":\"error\""));
-        assert!(json.contains("\"message\":\"test error\""));
-
-        let parsed: IpcResponse = serde_json::from_str(&json).unwrap();
-        match parsed {
-            IpcResponse::Error { message } => assert_eq!(message, "test error"),
-            _ => panic!("Expected Error"),
-        }
-    }
-
-    #[test]
-    fn session_info_serialization() {
-        let info = SessionInfo {
-            session_id: "abc123".into(),
-            cwd: "/tmp".into(),
-            state: SessionState::Running,
-            running_tools: vec![RunningTool {
-                tool_id: "t1".into(),
-                tool_name: "Read".into(),
-                tool_label: Some("main.rs".into()),
-            }],
-            name: None,
-            stopped_at: None,
-            stale_at: None,
-            permission_tool: None,
-            git_branch: None,
-            message_count: None,
-            last_prompt_preview: None,
-        };
-
-        let json = serde_json::to_string(&info).unwrap();
-        assert!(json.contains("\"session_id\":\"abc123\""));
-        assert!(json.contains("\"state\":\"running\""));
-        assert!(json.contains("\"tool_name\":\"Read\""));
-
-        let parsed: SessionInfo = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.session_id, "abc123");
-        assert_eq!(parsed.running_tools.len(), 1);
     }
 }

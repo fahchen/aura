@@ -1,5 +1,0 @@
-{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}
-{"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"call_1","arguments":{"cmd":"ls"}}}
-{"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"call_2","arguments":{"sandbox_permissions":"require_escalated","justification":"need"}}}
-{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"ok"}}
-{"type":"event_msg","payload":{"type":"context_compacted"}}

@@ -182,37 +182,37 @@ impl ThemeColors {
                 a: 0.60,
             }, // White 60%
 
-            // Backgrounds: very transparent (4-8%)
+            // Backgrounds: extremely transparent (1-4%) - increased see-through
             container_bg: Hsla {
                 h: 0.0,
                 s: 0.0,
                 l: 1.0,
-                a: 0.06,
-            }, // 6%
+                a: 0.03,
+            }, // 3%
             content_bg: Hsla {
-                h: 0.0,
-                s: 0.0,
-                l: 1.0,
-                a: 0.04,
-            }, // 4%
-            row_bg: Hsla {
                 h: 0.0,
                 s: 0.0,
                 l: 1.0,
                 a: 0.02,
             }, // 2%
+            row_bg: Hsla {
+                h: 0.0,
+                s: 0.0,
+                l: 1.0,
+                a: 0.01,
+            }, // 1%
             row_hover_bg: Hsla {
                 h: 0.0,
                 s: 0.0,
                 l: 1.0,
-                a: 0.08,
-            }, // 8%
+                a: 0.04,
+            }, // 4%
             indicator_bg: Hsla {
                 h: 0.0,
                 s: 0.0,
                 l: 1.0,
-                a: 0.08,
-            }, // 8%
+                a: 0.04,
+            }, // 4%
 
             // Borders: very subtle (6-10%)
             border: Hsla {
@@ -320,37 +320,37 @@ impl ThemeColors {
                 a: 1.0,
             }, // #737373
 
-            // Backgrounds: very transparent black (3-6%)
+            // Backgrounds: extremely transparent black (1-3%) - increased see-through
             container_bg: Hsla {
                 h: 0.0,
                 s: 0.0,
                 l: 0.0,
-                a: 0.04,
-            }, // 4%
+                a: 0.02,
+            }, // 2%
             content_bg: Hsla {
+                h: 0.0,
+                s: 0.0,
+                l: 0.0,
+                a: 0.015,
+            }, // 1.5%
+            row_bg: Hsla {
+                h: 0.0,
+                s: 0.0,
+                l: 0.0,
+                a: 0.005,
+            }, // 0.5%
+            row_hover_bg: Hsla {
                 h: 0.0,
                 s: 0.0,
                 l: 0.0,
                 a: 0.03,
             }, // 3%
-            row_bg: Hsla {
-                h: 0.0,
-                s: 0.0,
-                l: 0.0,
-                a: 0.01,
-            }, // 1%
-            row_hover_bg: Hsla {
-                h: 0.0,
-                s: 0.0,
-                l: 0.0,
-                a: 0.06,
-            }, // 6%
             indicator_bg: Hsla {
                 h: 0.0,
                 s: 0.0,
                 l: 0.0,
-                a: 0.06,
-            }, // 6%
+                a: 0.03,
+            }, // 3%
 
             // Borders: very subtle black (5-8%)
             border: Hsla {

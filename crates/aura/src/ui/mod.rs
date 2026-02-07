@@ -214,7 +214,7 @@ impl Render for IndicatorView {
                                     indicator_origin.x - px((EXPANDED_WIDTH - COLLAPSED_WIDTH) / 2.0),
                                     indicator_origin.y + px(COLLAPSED_HEIGHT + WINDOW_GAP),
                                 );
-                                let session_count = hud_state.sessions.len().max(1).min(MAX_SESSIONS);
+                                let session_count = hud_state.sessions.len().clamp(1, MAX_SESSIONS);
                                 let height = calculate_expanded_height(session_count);
 
                                 state_for_click.update(app, |state, _cx| {
@@ -512,10 +512,9 @@ impl Render for SessionListView {
         let (tool_index, fade_progress) =
             calculate_animation_state(animation_start, hud_state.animation_seed);
 
-        let sessions_for_render: Vec<_> = sessions.iter().cloned().collect();
+        let sessions_for_render: Vec<_> = sessions.to_vec();
         let session_count = total_count;
-        let theme_colors = theme_colors.clone();
-        let list_theme_colors = theme_colors.clone();
+        let list_theme_colors = theme_colors;
 
         // Build current session IDs set
         let current_ids: std::collections::HashSet<_> = sessions_for_render
@@ -678,7 +677,7 @@ fn open_session_list_window_sync(app: &mut App, state: Entity<SharedHudState>) {
                 kind: WindowKind::PopUp,
                 is_movable: true,
                 is_resizable: false,
-                window_background: WindowBackgroundAppearance::Transparent,
+                window_background: WindowBackgroundAppearance::Blurred,
                 ..Default::default()
             },
             |_window, app| {
@@ -847,7 +846,7 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<Atomic
                     kind: WindowKind::PopUp,
                     is_movable: true,
                     is_resizable: false,
-                    window_background: WindowBackgroundAppearance::Transparent,
+                    window_background: WindowBackgroundAppearance::Blurred,
                     ..Default::default()
                 },
                 |_window, app| {

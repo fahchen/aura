@@ -135,6 +135,7 @@ fn render_session_event(
             session,
             args.tool_index,
             args.fade_progress,
+            args.animation_start,
             args.theme,
         ))
 }
@@ -241,9 +242,19 @@ fn render_tool_or_placeholder(
     session: &SessionInfo,
     tool_index: usize,
     fade_progress: f32,
+    animation_start: Instant,
     theme: &ThemeColors,
 ) -> Div {
     if session.running_tools.is_empty() {
+        if let Some(activity_text) = get_recent_activity_text(session, animation_start) {
+            return div()
+                .flex_1()
+                .min_w_0()
+                .h(px(18.0))
+                .overflow_hidden()
+                .child(render_activity_text(&activity_text, theme));
+        }
+
         // Show state-specific placeholder
         let placeholder_text = get_placeholder_text(session);
         let icon_path = get_placeholder_icon(session.state);
@@ -312,6 +323,42 @@ fn render_current_tool(tools: &[RunningTool], tool_index: usize, fade_progress: 
                 .overflow_hidden()
                 .opacity(next_opacity)
                 .child(render_tool_with_icon(next_tool, theme)),
+        )
+}
+
+/// Rotate through recent activity without repeats.
+fn get_recent_activity_text(session: &SessionInfo, animation_start: Instant) -> Option<String> {
+    let items = &session.recent_activity;
+    if items.is_empty() {
+        return None;
+    }
+    let seconds = animation_start.elapsed().as_secs();
+    let idx = (seconds / 3) as usize % items.len();
+    items.get(idx).cloned()
+}
+
+/// Render recent activity text (non-italic, neutral icon)
+fn render_activity_text(text: &str, theme: &ThemeColors) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .child(
+            svg()
+                .path("icons/spotlight.svg")
+                .size(px(10.0))
+                .text_color(theme.text_secondary),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .font_family("Maple Mono NF CN")
+                .text_size(px(12.0))
+                .text_color(theme.text_secondary)
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(text.to_string()),
         )
 }
 

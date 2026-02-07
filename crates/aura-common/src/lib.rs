@@ -1,25 +1,14 @@
 //! Shared types for Aura HUD
 //!
-//! Currently supports Claude Code and Codex. The architecture is designed to support
-//! additional agents in future versions.
+//! Currently supports Claude Code and Codex.
 //!
 //! - AgentEvent: Events from code agents
 //! - SessionState: Session state machine
-//! - IPC protocol
-//! - Transcript parsing types and utilities
-//!
-//! The Claude Code and Codex adapters are in the `adapters` module.
+//! - IPC: Message types for hook → daemon communication
 
 mod event;
-mod ipc;
+pub mod ipc;
 mod session;
-pub mod time;
-pub mod transcript;
-
-pub mod adapters;
 
 pub use event::*;
-pub use ipc::*;
 pub use session::*;
-pub use time::*;
-pub use transcript::*;
