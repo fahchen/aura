@@ -165,7 +165,7 @@ impl CodexClient {
         let msg: Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(e) => {
-                trace!("malformed JSON from codex: {e}");
+                warn!("malformed JSON from codex: {e}");
                 return;
             }
         };
@@ -179,8 +179,15 @@ impl CodexClient {
             }
             // If it has both `id` and `method`, it's a server request (e.g., requestApproval)
             if let Some(method) = msg.get("method").and_then(|m| m.as_str()) {
+                let request_id = match id.as_u64() {
+                    Some(n) => n,
+                    None => {
+                        warn!("codex server request has non-numeric id: {id}, skipping");
+                        return;
+                    }
+                };
                 self.handle_server_request(
-                    id.as_u64().unwrap_or(0),
+                    request_id,
                     method,
                     msg.get("params").unwrap_or(&Value::Null),
                 )
@@ -543,7 +550,7 @@ mod tests {
             dirty.store(true, Ordering::Relaxed);
         }
 
-        let sessions = reg.lock().unwrap().get_all();
+        let sessions = reg.lock().expect("registry lock poisoned").get_all();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, "thr_1");
     }
@@ -586,7 +593,7 @@ mod tests {
             });
         }
 
-        let sessions = reg.lock().unwrap().get_all();
+        let sessions = reg.lock().expect("registry lock poisoned").get_all();
         assert_eq!(sessions[0].running_tools.len(), 1);
         assert_eq!(sessions[0].running_tools[0].tool_name, "npm");
     }
