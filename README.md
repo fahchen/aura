@@ -11,7 +11,7 @@ Aura monitors AI coding agents as they work, displaying session state and active
 - State indicators: Running → Idle → Attention → Waiting → Compacting → Stale
 - Multi-session tracking with minimal 36×36 collapsed indicator
 - Glassmorphism design with liquid glass aesthetic
-- Supports Claude Code (hooks) and Codex (app-server)
+- Supports Claude Code, Gemini CLI, OpenCode (hooks) and Codex (app-server)
 
 ## Screenshots
 
@@ -52,6 +52,9 @@ aura
 aura hook-install
 # Add the output to ~/.claude/settings.json under "hooks"
 
+# Hook agent supports: claude-code, gemini-cli, open-code
+aura hook --agent claude-code
+
 # Install Claude Code plugin (in Claude Code)
 /plugin marketplace add fahchen/skills
 /plugin install aura@fahchen-skills
@@ -62,8 +65,8 @@ aura hook-install
 ## Development
 
 ```bash
-cargo test --workspace           # Run tests
-cargo build -p aura              # Build daemon only
+cargo test                       # Run tests
+cargo build --release            # Build release binary
 ./scripts/bundle-macos.sh        # Create .app bundle
 
 # Prototype (React reference)
@@ -72,14 +75,8 @@ cd prototype && bun dev
 
 ## Architecture
 
-```
-aura-common            # Shared types: AgentEvent, SessionState, IPC
-    ↓
-aura                   # Hooks + Codex client + gpui HUD
-```
-
 **Event flow:**
-- Claude Code hooks → Unix socket → SessionRegistry → gpui render
+- Claude Code / Gemini CLI / OpenCode hooks → Unix socket → SessionRegistry → gpui render
 - Codex app-server → JSON-RPC (stdio) → SessionRegistry → gpui render
 
 ## Documentation

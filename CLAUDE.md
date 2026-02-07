@@ -36,19 +36,33 @@ Aura is a floating HUD that monitors AI coding sessions via hooks and app-server
 
 ```
 src/
-├── event.rs, session.rs    # Core domain types (AgentEvent, SessionState)
-├── ipc.rs                  # Unix socket path utility
-├── registry.rs             # Session state machine
-├── server.rs               # Unix socket server (receives hook events)
-├── agents/                 # Agent implementations
-│   ├── claude_code.rs      # Hook parser + install config
-│   └── codex.rs            # App-server JSON-RPC client
-└── ui/                     # gpui HUD (indicator + session list)
+├── main.rs                    # CLI parser, threading model
+├── lib.rs                     # Crate root, module exports
+├── event.rs                   # AgentEvent enum (10 variants)
+├── session.rs                 # SessionState, SessionInfo, RunningTool
+├── ipc.rs                     # Unix socket path utility
+├── registry.rs                # SessionRegistry state machine + tool tracking
+├── server.rs                  # Unix socket server (receives hook events)
+├── agents/
+│   ├── mod.rs                 # Helper functions: truncate(), short_path()
+│   ├── claude_code.rs         # Hook parser + print_install_config()
+│   └── codex.rs               # App-server JSON-RPC client
+└── ui/
+    ├── mod.rs                 # Two-window HUD driver
+    ├── indicator.rs           # Collapsed 36×36 indicator window
+    ├── session_list.rs        # Expanded session list window
+    ├── animation.rs           # Tool cycling, breathe, shake, marquee animations
+    ├── theme.rs               # Theme system + color palettes
+    ├── icons.rs               # SVG paths + tool icon mapping
+    ├── assets.rs              # SVG asset preloading
+    └── glass.rs               # Glassmorphism rendering helper
 ```
 
 ### Session Sources
 
 - **Claude Code**: Hooks system — `aura hook --agent claude-code` receives events via stdin, forwards to daemon over Unix socket
+- **Gemini CLI**: Hooks system — `aura hook --agent gemini-cli` (same flow as Claude Code)
+- **OpenCode**: Hooks system — `aura hook --agent open-code` (same flow as Claude Code)
 - **Codex**: App-server JSON-RPC client — spawns `codex app-server` subprocess, communicates via stdio
 
 ### Threading Model
@@ -60,32 +74,40 @@ src/
 ### Event Flow
 
 ```
-Claude Code hooks → aura hook --agent claude-code → Unix socket → SessionRegistry
-Codex app-server ← JSON-RPC (stdio) ← aura                    → SessionRegistry
-                                                                       ↓
-                                                              gpui polls each frame
-                                                                       ↓
-                                                         Indicator + SessionList windows
+Claude Code / Gemini CLI / OpenCode hooks → aura hook --agent <type> → Unix socket → SessionRegistry
+Codex app-server ← JSON-RPC (stdio) ← aura                                       → SessionRegistry
+                                                                                          ↓
+                                                                                 gpui polls each frame
+                                                                                          ↓
+                                                                            Indicator + SessionList windows
 ```
 
 ### Key Modules
 
 | File | Purpose |
 |------|---------|
-| `src/event.rs` | `AgentEvent` enum (Running, Idle, Attention, etc.) |
-| `src/session.rs` | `SessionState` and session metadata |
+| `src/main.rs` | CLI parser, threading model |
+| `src/lib.rs` | Crate root, module exports |
+| `src/event.rs` | `AgentEvent` enum (10 variants) |
+| `src/session.rs` | `SessionState`, `SessionInfo`, `RunningTool` |
 | `src/ipc.rs` | Socket path utility |
-| `src/agents/claude_code.rs` | Hook handler (stdin JSON → Unix socket) |
-| `src/agents/codex.rs` | Codex app-server JSON-RPC client |
 | `src/server.rs` | Unix socket server |
 | `src/registry.rs` | Session state machine, tool tracking |
+| `src/agents/mod.rs` | Helper functions: `truncate()`, `short_path()` |
+| `src/agents/claude_code.rs` | Hook handler (stdin JSON → Unix socket) |
+| `src/agents/codex.rs` | Codex app-server JSON-RPC client |
 | `src/ui/mod.rs` | Two-window HUD driver |
 | `src/ui/indicator.rs` | Collapsed 36×36 indicator window |
 | `src/ui/session_list.rs` | Expanded session list window |
+| `src/ui/animation.rs` | Tool cycling, breathe, shake, marquee animations |
+| `src/ui/theme.rs` | Theme system + color palettes |
+| `src/ui/icons.rs` | SVG paths + tool icon mapping |
+| `src/ui/assets.rs` | SVG asset preloading |
+| `src/ui/glass.rs` | Glassmorphism rendering helper |
 
 ### Session States
 
-Running → Idle → Stale (10min timeout), or Running → Attention (permission needed), or Running → Compacting (context compact).
+Running → Idle → Stale (10min timeout), or Running → Attention (permission needed), or Running → Waiting (awaiting user input), or Running → Compacting (context compact).
 
 ### Design Reference
 
@@ -101,7 +123,7 @@ aura
 # Set a custom session name (for HUD display)
 aura set-name "fixing auth bug"
 
-# Handle hook events (called by Claude Code hooks config)
+# Handle hook events (agents: claude-code, gemini-cli, open-code)
 aura hook --agent claude-code
 
 # Print Claude Code hooks config for ~/.claude/settings.json
