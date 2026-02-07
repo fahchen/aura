@@ -8,10 +8,10 @@ Aura monitors AI coding agents as they work, displaying session state and active
 
 **Key features:**
 - Real-time tool visibility (Read, Write, Grep, Bash, etc.)
-- State indicators: Running → Idle → Attention → Waiting → Compacting → Stale
+- Six session states: Running, Idle, Attention, Waiting, Compacting, Stale
 - Multi-session tracking with minimal 36×36 collapsed indicator
-- Glassmorphism design with liquid glass aesthetic
-- Supports Claude Code, Gemini CLI, OpenCode (hooks) and Codex (app-server)
+- Five themes: System, Liquid Dark/Light, Solid Dark/Light
+- Supports Claude Code (hooks) and Codex (app-server)
 
 ## Screenshots
 
@@ -34,8 +34,6 @@ Aura monitors AI coding agents as they work, displaying session state and active
 | Compacting | 🍪 cookie | Compacting context |
 | Stale | 👻 ghost | No activity for 10 minutes |
 
-Sessions automatically transition to **Stale** after 10 minutes of inactivity.
-
 ## Installation
 
 ```bash
@@ -47,20 +45,17 @@ export PATH="/path/to/aura/target/release:$PATH"
 
 # Start daemon
 aura
+```
 
-# Install Claude Code hooks
-aura hook-install
-# Add the output to ~/.claude/settings.json under "hooks"
+### Claude Code Integration
 
-# Hook agent supports: claude-code, gemini-cli, open-code
-aura hook --agent claude-code
+Install the Aura plugin for hooks and session naming:
 
-# Install Claude Code plugin (in Claude Code)
+```bash
+# In Claude Code
 /plugin marketplace add fahchen/skills
 /plugin install aura@fahchen-skills
 ```
-
----
 
 ## Development
 
@@ -73,16 +68,11 @@ cargo build --release            # Build release binary
 cd prototype && bun dev
 ```
 
-## Architecture
-
-**Event flow:**
-- Claude Code / Gemini CLI / OpenCode hooks → Unix socket → SessionRegistry → gpui render
-- Codex app-server → JSON-RPC (stdio) → SessionRegistry → gpui render
-
 ## Documentation
 
 - [`CLAUDE.md`](./CLAUDE.md) - Developer guide
-- [`docs/design-spec.md`](./docs/design-spec.md) - Visual specifications
+- [`spec/`](./spec/) - BDD feature specs and behaviour decisions
+- [`prototype/`](./prototype/) - React visual design reference
 
 ## License
 
