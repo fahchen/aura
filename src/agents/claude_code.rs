@@ -1,6 +1,6 @@
 //! Agent hook handler
 //!
-//! Reads hook JSON from stdin, converts to IPC messages, sends to daemon via Unix socket.
+//! Reads hook JSON from stdin, converts to `AgentEvent`s, sends to daemon via Unix socket.
 //! Invoked as `aura hook --agent <name>` subcommand.
 //!
 //! Each agent has its own stdin JSON format. The `--agent` flag selects the parser.
@@ -10,8 +10,8 @@
 //! { "type": "command", "command": "aura hook --agent claude-code" }
 //! ```
 
-use aura_common::ipc::{self, IpcMessage};
-use aura_common::AgentType;
+use crate::ipc;
+use crate::{AgentEvent, AgentType};
 use serde_json::Value;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -61,7 +61,7 @@ pub fn print_install_config() {
 
 /// Entry point for `aura hook` subcommand.
 pub fn run(agent: &HookAgent) {
-    let converter: fn(&Value) -> Option<Vec<IpcMessage>> = match agent {
+    let converter: fn(&Value) -> Option<Vec<AgentEvent>> = match agent {
         HookAgent::ClaudeCode => convert_claude_code,
         other => {
             eprintln!("hook handler for {other:?} is not yet implemented");
@@ -109,17 +109,17 @@ fn common_fields(hook: &Value) -> Option<(String, String)> {
     Some((session_id, cwd))
 }
 
-/// Convert Claude Code hook JSON to IPC messages.
+/// Convert Claude Code hook JSON to agent events.
 ///
 /// Claude Code hooks deliver JSON via stdin with a `hook_event_name` field.
 /// See: https://docs.anthropic.com/en/docs/claude-code/hooks
-fn convert_claude_code(hook: &Value) -> Option<Vec<IpcMessage>> {
+fn convert_claude_code(hook: &Value) -> Option<Vec<AgentEvent>> {
     let event_name = hook.get("hook_event_name")?.as_str()?;
     let (session_id, cwd) = common_fields(hook)?;
 
     let messages = match event_name {
         "SessionStart" => {
-            vec![IpcMessage::SessionStarted {
+            vec![AgentEvent::SessionStarted {
                 session_id,
                 cwd,
                 agent: AgentType::ClaudeCode,
@@ -139,7 +139,7 @@ fn convert_claude_code(hook: &Value) -> Option<Vec<IpcMessage>> {
                 .to_string();
             let tool_label = extract_tool_label(hook);
 
-            vec![IpcMessage::ToolStarted {
+            vec![AgentEvent::ToolStarted {
                 session_id,
                 cwd,
                 tool_id,
@@ -155,7 +155,7 @@ fn convert_claude_code(hook: &Value) -> Option<Vec<IpcMessage>> {
                 .unwrap_or("unknown")
                 .to_string();
 
-            vec![IpcMessage::ToolCompleted {
+            vec![AgentEvent::ToolCompleted {
                 session_id,
                 cwd,
                 tool_id,
@@ -174,7 +174,7 @@ fn convert_claude_code(hook: &Value) -> Option<Vec<IpcMessage>> {
                         .get("tool_name")
                         .and_then(|v| v.as_str())
                         .map(String::from);
-                    vec![IpcMessage::NeedsAttention {
+                    vec![AgentEvent::NeedsAttention {
                         session_id,
                         cwd,
                         message,
@@ -185,7 +185,7 @@ fn convert_claude_code(hook: &Value) -> Option<Vec<IpcMessage>> {
                         .get("message")
                         .and_then(|v| v.as_str())
                         .map(String::from);
-                    vec![IpcMessage::WaitingForInput {
+                    vec![AgentEvent::WaitingForInput {
                         session_id,
                         cwd,
                         message,
@@ -196,7 +196,7 @@ fn convert_claude_code(hook: &Value) -> Option<Vec<IpcMessage>> {
                         .get("message")
                         .and_then(|v| v.as_str())
                         .map(String::from);
-                    vec![IpcMessage::NeedsAttention {
+                    vec![AgentEvent::NeedsAttention {
                         session_id,
                         cwd,
                         message,
@@ -210,7 +210,7 @@ fn convert_claude_code(hook: &Value) -> Option<Vec<IpcMessage>> {
                 .get("tool_name")
                 .and_then(|v| v.as_str())
                 .map(String::from);
-            vec![IpcMessage::NeedsAttention {
+            vec![AgentEvent::NeedsAttention {
                 session_id,
                 cwd,
                 message,
@@ -218,19 +218,19 @@ fn convert_claude_code(hook: &Value) -> Option<Vec<IpcMessage>> {
         }
 
         "Stop" => {
-            vec![IpcMessage::Idle { session_id, cwd }]
+            vec![AgentEvent::Idle { session_id, cwd }]
         }
 
         "PreCompact" => {
-            vec![IpcMessage::Compacting { session_id, cwd }]
+            vec![AgentEvent::Compacting { session_id, cwd }]
         }
 
         "SessionEnd" => {
-            vec![IpcMessage::SessionEnded { session_id }]
+            vec![AgentEvent::SessionEnded { session_id }]
         }
 
         "UserPromptSubmit" => {
-            vec![IpcMessage::Activity { session_id, cwd }]
+            vec![AgentEvent::Activity { session_id, cwd }]
         }
 
         "SubagentStart" | "SubagentStop" => return None,
@@ -251,11 +251,11 @@ fn extract_tool_label(hook: &Value) -> Option<String> {
             .get("description")
             .and_then(|v| v.as_str())
             .or_else(|| input.get("command").and_then(|v| v.as_str()))
-            .map(|s| truncate(s, 60).to_string()),
+            .map(|s| super::truncate(s, 60).to_string()),
         "Read" | "Write" | "Edit" => input
             .get("file_path")
             .and_then(|v| v.as_str())
-            .map(short_path),
+            .map(super::short_path),
         "Glob" => input
             .get("pattern")
             .and_then(|v| v.as_str())
@@ -263,32 +263,21 @@ fn extract_tool_label(hook: &Value) -> Option<String> {
         "Grep" => input
             .get("pattern")
             .and_then(|v| v.as_str())
-            .map(|s| truncate(s, 40).to_string()),
+            .map(|s| super::truncate(s, 40).to_string()),
         "WebFetch" => input
             .get("url")
             .and_then(|v| v.as_str())
-            .map(|s| truncate(s, 60).to_string()),
+            .map(|s| super::truncate(s, 60).to_string()),
         "WebSearch" => input
             .get("query")
             .and_then(|v| v.as_str())
-            .map(|s| truncate(s, 60).to_string()),
+            .map(|s| super::truncate(s, 60).to_string()),
         "Task" => input
             .get("description")
             .and_then(|v| v.as_str())
-            .map(|s| truncate(s, 60).to_string()),
+            .map(|s| super::truncate(s, 60).to_string()),
         _ => None,
     }
-}
-
-fn truncate(s: &str, max: usize) -> &str {
-    match s.char_indices().nth(max) {
-        Some((idx, _)) => &s[..idx],
-        None => s,
-    }
-}
-
-fn short_path(path: &str) -> String {
-    path.rsplit('/').next().unwrap_or(path).to_string()
 }
 
 #[cfg(test)]
@@ -386,7 +375,7 @@ mod tests {
         let msgs = convert_claude_code(&hook).unwrap();
         assert_eq!(msgs.len(), 1);
         let json = serde_json::to_string(&msgs[0]).unwrap();
-        assert!(json.contains("\"event\":\"idle\""));
+        assert!(json.contains("\"type\":\"idle\""));
     }
 
     #[test]
@@ -423,7 +412,7 @@ mod tests {
         });
         let msgs = convert_claude_code(&hook).unwrap();
         let json = serde_json::to_string(&msgs[0]).unwrap();
-        assert!(json.contains("\"event\":\"activity\""));
+        assert!(json.contains("\"type\":\"activity\""));
     }
 
     #[test]

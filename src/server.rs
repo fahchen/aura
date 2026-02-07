@@ -1,10 +1,10 @@
-//! Unix socket server for receiving IPC messages from aura-hook
+//! Unix socket server for receiving agent events from aura-hook
 //!
 //! Listens on `/tmp/aura.sock` for newline-delimited JSON messages.
-//! Each message is parsed as an `IpcMessage` and converted to an `AgentEvent`.
+//! Each message is deserialized directly as an `AgentEvent`.
 
-use aura_common::ipc::{self, IpcMessage};
-use aura_common::AgentEvent;
+use crate::ipc;
+use crate::AgentEvent;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -54,9 +54,8 @@ pub async fn start(
                         if line.is_empty() {
                             continue;
                         }
-                        match serde_json::from_str::<IpcMessage>(&line) {
-                            Ok(msg) => {
-                                let event: AgentEvent = msg.into();
+                        match serde_json::from_str::<AgentEvent>(&line) {
+                            Ok(event) => {
                                 debug!(?event, "ipc event");
                                 if let Ok(mut reg) = reg.lock() {
                                     reg.process_event(event);

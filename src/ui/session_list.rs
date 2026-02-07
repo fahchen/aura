@@ -9,7 +9,7 @@
 use super::animation::{calculate_shake_offset, ease_in_out};
 use super::icons;
 use super::theme::{ThemeColors, WINDOW_RADIUS};
-use aura_common::{RunningTool, SessionInfo, SessionState, PLACEHOLDER_TEXTS};
+use crate::{RunningTool, SessionInfo, SessionState, PLACEHOLDER_TEXTS};
 use chrono::{DateTime, Local, Utc};
 use gpui::{div, px, radians, svg, Div, Hsla, InteractiveElement, ParentElement, Styled, Transformation};
 use std::time::Instant;
@@ -26,15 +26,15 @@ const HEADER_GAP: f32 = 8.0;
 const EVENT_PADDING_LEFT: f32 = 24.0; // Icon width (14) + gap (8) + 2 = align under name
 
 /// Shared render arguments for a session row.
-pub struct RowRenderArgs<'a> {
-    pub tool_index: usize,
-    pub fade_progress: f32,
-    pub animation_start: Instant,
-    pub state_opacity: f32,
-    pub state_x: f32,
-    pub remove_opacity: f32,
-    pub remove_x: f32,
-    pub theme: &'a ThemeColors,
+pub(crate) struct RowRenderArgs<'a> {
+    pub(crate) tool_index: usize,
+    pub(crate) fade_progress: f32,
+    pub(crate) animation_start: Instant,
+    pub(crate) state_opacity: f32,
+    pub(crate) state_x: f32,
+    pub(crate) remove_opacity: f32,
+    pub(crate) remove_x: f32,
+    pub(crate) theme: &'a ThemeColors,
 }
 
 /// Render the content of a session row (two-line vertical layout)
@@ -59,7 +59,7 @@ pub struct RowRenderArgs<'a> {
 ///
 /// Note: The outer wrapper with hover handler is created in mod.rs since
 /// it needs access to `cx.listener()` which is tied to HudView.
-pub fn render_row_content(
+pub(crate) fn render_row_content(
     session: &SessionInfo,
     session_name: &str,
     args: &RowRenderArgs<'_>,
@@ -366,7 +366,7 @@ fn render_activity_text(text: &str, theme: &ThemeColors) -> Div {
 const TOOL_ICON_WIDTH: f32 = 12.0;
 
 /// Render a tool with its SVG icon (using theme colors)
-pub fn render_tool_with_icon(tool: &RunningTool, theme: &ThemeColors) -> Div {
+pub(crate) fn render_tool_with_icon(tool: &RunningTool, theme: &ThemeColors) -> Div {
     let icon_path = icons::tool_icon_asset(&tool.tool_name);
     let display_text = if tool.tool_name.starts_with("mcp__") {
         // Extract server name from mcp__server__function format
@@ -426,7 +426,7 @@ pub fn render_tool_with_icon(tool: &RunningTool, theme: &ThemeColors) -> Div {
 }
 
 /// Extract session name from cwd (last folder name)
-pub fn extract_session_name(cwd: &str) -> String {
+pub(crate) fn extract_session_name(cwd: &str) -> String {
     std::path::Path::new(cwd)
         .file_name()
         .and_then(|s| s.to_str())
@@ -545,7 +545,7 @@ fn state_to_opacity(state: SessionState) -> f32 {
 pub const HEADER_HEIGHT: f32 = 28.0;
 
 /// Calculate expanded window height based on session count
-pub fn calculate_expanded_height(session_count: usize) -> f32 {
+pub(crate) fn calculate_expanded_height(session_count: usize) -> f32 {
     let count = session_count.min(MAX_SESSIONS);
     // Header (28px) + rows + container padding (10px top + 10px bottom)
     HEADER_HEIGHT + (ROW_HEIGHT + ROW_GAP) * count as f32 + 20.0

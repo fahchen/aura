@@ -13,7 +13,7 @@
 use super::animation::{calculate_shake_offset, ease_out};
 use super::icons;
 use super::theme::ThemeColors;
-use aura_common::{SessionInfo, SessionState};
+use crate::{SessionInfo, SessionState};
 use gpui::{div, prelude::FluentBuilder, px, radians, svg, Div, Hsla, ParentElement, Styled, Transformation};
 use std::time::Instant;
 

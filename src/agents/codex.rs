@@ -6,7 +6,7 @@
 //!
 //! Protocol: JSON-RPC 2.0 without the `"jsonrpc":"2.0"` header on the wire.
 
-use aura_common::{AgentEvent, AgentType};
+use crate::{AgentEvent, AgentType};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::sync::{
@@ -23,8 +23,18 @@ use crate::registry::SessionRegistry;
 /// How often to poll for new threads
 const THREAD_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Extract thread ID from JSON params, with optional fallback object.
+fn thread_id(params: &Value, fallback: Option<&Value>) -> String {
+    params
+        .get("threadId")
+        .or_else(|| fallback.and_then(|f| f.get("threadId")))
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string()
+}
+
 /// Client for Codex app-server
-pub struct CodexClient {
+pub(crate) struct CodexClient {
     child: Child,
     writer: tokio::process::ChildStdin,
     next_id: u64,
@@ -36,7 +46,7 @@ pub struct CodexClient {
 
 impl CodexClient {
     /// Spawn `codex app-server` and perform the initialize handshake.
-    pub async fn connect(
+    pub(crate) async fn connect(
         registry: Arc<Mutex<SessionRegistry>>,
         dirty: Arc<AtomicBool>,
     ) -> Option<(Self, tokio::io::Lines<BufReader<tokio::process::ChildStdout>>)> {
@@ -121,7 +131,7 @@ impl CodexClient {
     }
 
     /// Send a thread/list request to discover active threads.
-    pub async fn list_threads(&mut self) -> Result<(), std::io::Error> {
+    pub(crate) async fn list_threads(&mut self) -> Result<(), std::io::Error> {
         let req = json!({
             "method": "thread/list",
             "id": self.next_id(),
@@ -134,7 +144,7 @@ impl CodexClient {
     }
 
     /// Resume a thread to subscribe to its events.
-    pub async fn resume_thread(&mut self, thread_id: &str) -> Result<(), std::io::Error> {
+    pub(crate) async fn resume_thread(&mut self, thread_id: &str) -> Result<(), std::io::Error> {
         if self.known_threads.contains(thread_id) {
             return Ok(());
         }
@@ -151,10 +161,13 @@ impl CodexClient {
     }
 
     /// Process a line from the app-server stdout.
-    pub async fn handle_message(&mut self, line: &str) {
+    pub(crate) async fn handle_message(&mut self, line: &str) {
         let msg: Value = match serde_json::from_str(line) {
             Ok(v) => v,
-            Err(_) => return,
+            Err(e) => {
+                trace!("malformed JSON from codex: {e}");
+                return;
+            }
         };
 
         trace!("codex <- {}", line);
@@ -204,7 +217,7 @@ impl CodexClient {
                     if !preview.is_empty() {
                         let name_event = AgentEvent::SessionNameUpdated {
                             session_id: thread_id.to_string(),
-                            name: truncate_str(preview, 40).to_string(),
+                            name: super::truncate(preview, 40).to_string(),
                         };
                         self.emit_event(name_event);
                     }
@@ -224,10 +237,7 @@ impl CodexClient {
             | "item/fileChange/requestApproval"
             | "item/tool/call" => {
                 // Map to NeedsAttention
-                let thread_id = params
-                    .get("threadId")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
+                let thread_id = thread_id(params, None);
                 let tool_name = if method.contains("commandExecution") {
                     params
                         .get("command")
@@ -245,7 +255,7 @@ impl CodexClient {
                 };
 
                 let event = AgentEvent::NeedsAttention {
-                    session_id: thread_id.to_string(),
+                    session_id: thread_id,
                     cwd: params
                         .get("cwd")
                         .and_then(|v| v.as_str())
@@ -260,12 +270,9 @@ impl CodexClient {
                 let _ = id;
             }
             "tool/requestUserInput" => {
-                let thread_id = params
-                    .get("threadId")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
+                let thread_id = thread_id(params, None);
                 let event = AgentEvent::WaitingForInput {
-                    session_id: thread_id.to_string(),
+                    session_id: thread_id,
                     cwd: String::new(),
                     message: params
                         .get("message")
@@ -299,13 +306,9 @@ impl CodexClient {
 
             "turn/started" => {
                 if let Some(turn) = params.get("turn") {
-                    let thread_id = params
-                        .get("threadId")
-                        .or_else(|| turn.get("threadId"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
+                    let thread_id = thread_id(params, Some(turn));
                     let event = AgentEvent::Activity {
-                        session_id: thread_id.to_string(),
+                        session_id: thread_id,
                         cwd: String::new(),
                     };
                     self.emit_event(event);
@@ -313,18 +316,9 @@ impl CodexClient {
             }
 
             "turn/completed" => {
-                let thread_id = params
-                    .get("threadId")
-                    .and_then(|v| v.as_str())
-                    .or_else(|| {
-                        params
-                            .get("turn")
-                            .and_then(|t| t.get("threadId"))
-                            .and_then(|v| v.as_str())
-                    })
-                    .unwrap_or("unknown");
+                let thread_id = thread_id(params, params.get("turn"));
                 let event = AgentEvent::Idle {
-                    session_id: thread_id.to_string(),
+                    session_id: thread_id,
                     cwd: String::new(),
                 };
                 self.emit_event(event);
@@ -333,10 +327,7 @@ impl CodexClient {
             "item/started" => {
                 if let Some(item) = params.get("item") {
                     let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                    let thread_id = params
-                        .get("threadId")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
+                    let thread_id = thread_id(params, None);
 
                     match item_type {
                         "commandExecution" | "mcpToolCall" | "collabToolCall" => {
@@ -363,13 +354,13 @@ impl CodexClient {
                                             .collect::<Vec<_>>()
                                             .join(" ")
                                     })
-                                    .map(|s| truncate_str(&s, 60).to_string())
+                                    .map(|s| super::truncate(&s, 60).to_string())
                             } else {
                                 None
                             };
 
                             let event = AgentEvent::ToolStarted {
-                                session_id: thread_id.to_string(),
+                                session_id: thread_id.clone(),
                                 cwd: item
                                     .get("cwd")
                                     .and_then(|v| v.as_str())
@@ -387,7 +378,7 @@ impl CodexClient {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("unknown");
                             let event = AgentEvent::ToolStarted {
-                                session_id: thread_id.to_string(),
+                                session_id: thread_id.clone(),
                                 cwd: String::new(),
                                 tool_id: item_id.to_string(),
                                 tool_name: "FileChange".to_string(),
@@ -402,7 +393,7 @@ impl CodexClient {
                         }
                         "contextCompaction" => {
                             let event = AgentEvent::Compacting {
-                                session_id: thread_id.to_string(),
+                                session_id: thread_id,
                                 cwd: String::new(),
                             };
                             self.emit_event(event);
@@ -415,10 +406,7 @@ impl CodexClient {
             "item/completed" => {
                 if let Some(item) = params.get("item") {
                     let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                    let thread_id = params
-                        .get("threadId")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
+                    let thread_id = thread_id(params, None);
 
                     match item_type {
                         "commandExecution" | "mcpToolCall" | "collabToolCall" | "fileChange" => {
@@ -427,7 +415,7 @@ impl CodexClient {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("unknown");
                             let event = AgentEvent::ToolCompleted {
-                                session_id: thread_id.to_string(),
+                                session_id: thread_id,
                                 cwd: item
                                     .get("cwd")
                                     .and_then(|v| v.as_str())
@@ -454,13 +442,6 @@ impl CodexClient {
             reg.process_event(event);
             self.dirty.store(true, Ordering::Relaxed);
         }
-    }
-}
-
-fn truncate_str(s: &str, max: usize) -> &str {
-    match s.char_indices().nth(max) {
-        Some((idx, _)) => &s[..idx],
-        None => s,
     }
 }
 
@@ -516,12 +497,12 @@ mod tests {
 
     #[test]
     fn truncate_short() {
-        assert_eq!(truncate_str("hello", 10), "hello");
+        assert_eq!(super::super::truncate("hello", 10), "hello");
     }
 
     #[test]
     fn truncate_long() {
-        assert_eq!(truncate_str("hello world", 5), "hello");
+        assert_eq!(super::super::truncate("hello world", 5), "hello");
     }
 
     fn make_registry() -> (Arc<Mutex<SessionRegistry>>, Arc<AtomicBool>) {

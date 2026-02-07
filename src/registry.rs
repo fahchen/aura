@@ -1,6 +1,6 @@
 //! Session registry - tracks active sessions and their state
 
-use aura_common::{AgentEvent, AgentType, RunningTool, SessionInfo, SessionState};
+use crate::{AgentEvent, AgentType, RunningTool, SessionInfo, SessionState};
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, trace};
@@ -25,31 +25,31 @@ const RECENT_TOOL_PREFIX: &str = "recent_";
 
 /// A tool that was recently completed but should remain visible briefly
 #[derive(Debug, Clone)]
-pub struct RecentTool {
-    pub tool_name: String,
-    pub tool_label: Option<String>,
-    pub expires_at: Instant,
+pub(crate) struct RecentTool {
+    pub(crate) tool_name: String,
+    pub(crate) tool_label: Option<String>,
+    pub(crate) expires_at: Instant,
 }
 
 /// Session data tracked by the daemon
 #[derive(Debug)]
 pub struct Session {
-    pub session_id: String,
-    pub cwd: String,
-    pub agent: AgentType,
-    pub state: SessionState,
-    pub running_tools: Vec<RunningTool>,
-    pub recent_tools: Vec<RecentTool>,
-    pub recent_activity: VecDeque<String>,
-    pub last_activity: Instant,
+    pub(crate) session_id: String,
+    pub(crate) cwd: String,
+    pub(crate) agent: AgentType,
+    pub(crate) state: SessionState,
+    pub(crate) running_tools: Vec<RunningTool>,
+    pub(crate) recent_tools: Vec<RecentTool>,
+    pub(crate) recent_activity: VecDeque<String>,
+    pub(crate) last_activity: Instant,
     /// Custom session name (if set by user via `aura set-name`)
-    pub name: Option<String>,
+    pub(crate) name: Option<String>,
     /// When the session became idle
-    pub stopped_at: Option<Instant>,
+    pub(crate) stopped_at: Option<Instant>,
     /// When the session became stale
-    pub stale_at: Option<Instant>,
+    pub(crate) stale_at: Option<Instant>,
     /// Tool requesting permission (from NeedsAttention message)
-    pub permission_tool: Option<String>,
+    pub(crate) permission_tool: Option<String>,
 }
 
 impl Session {

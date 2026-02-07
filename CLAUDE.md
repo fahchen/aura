@@ -5,28 +5,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Test Commands
 
 ```bash
-# Build all crates
+# Build
 cargo build --release
 
-# Build individual crates
-cargo build -p aura            # Main daemon + HUD
-cargo build -p aura-common     # Shared types
-
 # Run daemon
-cargo run -p aura
+cargo run
 
 # Run with verbosity (-v info, -vv debug, -vvv trace)
-cargo run -p aura -- -vv
+cargo run -- -vv
 
 # Run all tests
-cargo test --workspace
-
-# Run tests for specific crate
-cargo test -p aura-common
-cargo test -p aura
-
-# Visual tests (requires feature flag)
-cargo run -p aura --features visual-tests --bin aura_visual_tests
+cargo test
 
 # Build macOS app bundle
 ./scripts/bundle-macos.sh
@@ -43,12 +32,18 @@ bun run build  # Production build
 
 ## Architecture
 
-Aura is a floating HUD that monitors AI coding sessions via hooks and app-server integration. Two crates form the core:
+Aura is a floating HUD that monitors AI coding sessions via hooks and app-server integration. Single crate with modular structure:
 
 ```
-aura-common          # Shared types: AgentEvent, SessionState, IPC messages
-    ↓
-aura                 # Hooks + app-server client + gpui HUD
+src/
+├── event.rs, session.rs    # Core domain types (AgentEvent, SessionState)
+├── ipc.rs                  # Unix socket path utility
+├── registry.rs             # Session state machine
+├── server.rs               # Unix socket server (receives hook events)
+├── agents/                 # Agent implementations
+│   ├── claude_code.rs      # Hook parser + install config
+│   └── codex.rs            # App-server JSON-RPC client
+└── ui/                     # gpui HUD (indicator + session list)
 ```
 
 ### Session Sources
@@ -77,16 +72,16 @@ Codex app-server ← JSON-RPC (stdio) ← aura                    → SessionReg
 
 | File | Purpose |
 |------|---------|
-| `aura-common/src/event.rs` | `AgentEvent` enum (Running, Idle, Attention, etc.) |
-| `aura-common/src/session.rs` | `SessionState` and session metadata |
-| `aura-common/src/ipc.rs` | IPC message types for hook → daemon communication |
-| `aura/src/hook.rs` | Hook handler (stdin JSON → IPC socket) |
-| `aura/src/server.rs` | Unix socket server for IPC |
-| `aura/src/codex_client.rs` | Codex app-server JSON-RPC client |
-| `aura/src/registry.rs` | Session state machine, tool tracking |
-| `aura/src/ui/mod.rs` | Two-window HUD driver |
-| `aura/src/ui/indicator.rs` | Collapsed 36×36 indicator window |
-| `aura/src/ui/session_list.rs` | Expanded session list window |
+| `src/event.rs` | `AgentEvent` enum (Running, Idle, Attention, etc.) |
+| `src/session.rs` | `SessionState` and session metadata |
+| `src/ipc.rs` | Socket path utility |
+| `src/agents/claude_code.rs` | Hook handler (stdin JSON → Unix socket) |
+| `src/agents/codex.rs` | Codex app-server JSON-RPC client |
+| `src/server.rs` | Unix socket server |
+| `src/registry.rs` | Session state machine, tool tracking |
+| `src/ui/mod.rs` | Two-window HUD driver |
+| `src/ui/indicator.rs` | Collapsed 36×36 indicator window |
+| `src/ui/session_list.rs` | Expanded session list window |
 
 ### Session States
 

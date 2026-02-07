@@ -3,7 +3,7 @@
 //! Monitors AI coding sessions via hooks (Claude Code) and app-server (Codex),
 //! and renders the notch-flanking HUD icons.
 
-use aura::hook::HookAgent;
+use aura::agents::claude_code::HookAgent;
 use aura::{registry::SessionRegistry, ui};
 use clap::Parser;
 use std::sync::{
@@ -69,11 +69,11 @@ fn main() {
             return;
         }
         Some(Command::Hook { ref agent }) => {
-            aura::hook::run(agent);
+            aura::agents::claude_code::run(agent);
             return;
         }
         Some(Command::HookInstall) => {
-            aura::hook::print_install_config();
+            aura::agents::claude_code::print_install_config();
             return;
         }
         None => {}
@@ -110,7 +110,7 @@ fn main() {
             let codex_registry = Arc::clone(&bg_registry);
             let codex_dirty = Arc::clone(&bg_dirty);
             tokio::spawn(async move {
-                aura::codex_client::start(codex_registry, codex_dirty).await;
+                aura::agents::codex::start(codex_registry, codex_dirty).await;
             });
 
             // Start IPC socket server (accepts hook events via Unix socket)

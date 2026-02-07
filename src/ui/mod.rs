@@ -10,27 +10,20 @@
 //! - theme.rs: Theme system with Dark, Light, and System modes
 
 mod animation;
-pub mod assets;
+pub(crate) mod assets;
 mod glass;
-pub mod icons;
-pub mod indicator;
-pub mod session_list;
-pub mod theme;
+pub(crate) mod icons;
+pub(crate) mod indicator;
+pub(crate) mod session_list;
+pub(crate) mod theme;
 
-// Visual tests disabled - needs update for gpui API changes
-// #[cfg(test)]
-// mod visual_tests;
-
-/// Visual test helpers - available when `visual-tests` feature is enabled
-#[cfg(feature = "visual-tests")]
-pub mod visual_test_helpers;
 
 use animation::{
     calculate_animation_state, calculate_breathe_opacity, calculate_icon_swap,
     calculate_row_slide_in, calculate_row_slide_out,
 };
 use assets::Assets;
-use aura_common::{SessionInfo, SessionState};
+use crate::{SessionInfo, SessionState};
 use crate::registry::SessionRegistry;
 use gpui::{
     actions, div, point, px, size, uniform_list, App, AppContext, Application, Bounds, Context,
