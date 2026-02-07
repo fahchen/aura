@@ -146,3 +146,13 @@ For enhanced session naming, install the Claude Code skill:
 /plugin marketplace add fahchen/skills
 /plugin install aura@fahchen-skills
 ```
+
+## Project Knowledge
+
+**MUST read before coding:** Review [docs/agents/](docs/agents/) and follow the established patterns:
+
+- `knowledge.md`: Naming conventions, design decisions
+- `patterns.md`: Logging, testing, standard implementations
+- `improvements.md`: Past mistakes to avoid
+
+Use `/agent-docs:update-knowledge` to capture new learnings after a session.
