@@ -77,6 +77,46 @@ impl Session {
         self.permission_tool = None;
     }
 
+    /// Transition to Running state, clearing all timestamps and permission_tool
+    fn transition_to_running(&mut self) {
+        self.state = SessionState::Running;
+        self.clear_timestamps();
+    }
+
+    /// Transition to Running and add a tool to the running tools list
+    fn add_tool(&mut self, tool: RunningTool) {
+        self.transition_to_running();
+        self.running_tools.push(tool);
+    }
+
+    /// Complete a tool: ensure Running state, move tool to recent, record activity
+    fn complete_tool(&mut self, tool_id: &str) {
+        if self.state != SessionState::Running {
+            self.transition_to_running();
+        }
+        if let Some(pos) = self.running_tools.iter().position(|t| t.tool_id == tool_id) {
+            let tool = self.running_tools.remove(pos);
+            let label = tool
+                .tool_label
+                .clone()
+                .unwrap_or_else(|| tool.tool_name.clone());
+            self.recent_tools.push(RecentTool {
+                tool_name: tool.tool_name,
+                tool_label: tool.tool_label,
+                expires_at: Instant::now() + MIN_TOOL_DISPLAY,
+            });
+            self.push_recent_activity(label);
+        }
+    }
+
+    /// Transition to Idle state, clearing running tools and setting stopped_at
+    fn set_idle(&mut self) {
+        self.state = SessionState::Idle;
+        self.running_tools.clear();
+        self.stopped_at = Some(Instant::now());
+        self.permission_tool = None;
+    }
+
     fn touch(&mut self) {
         self.last_activity = Instant::now();
     }
@@ -150,20 +190,28 @@ impl SessionRegistry {
     }
 
     /// Get existing session or create a new one (late registration), update it, and touch.
-    fn update_session<F>(&mut self, session_id: &str, cwd: &str, updater: F)
-    where
+    fn update_session<F>(
+        &mut self,
+        session_id: &str,
+        cwd: &str,
+        default_agent: AgentType,
+        updater: F,
+    ) where
         F: FnOnce(&mut Session),
     {
         let session = self.sessions.entry(session_id.to_string()).or_insert_with(|| {
-            info!(%session_id, %cwd, "late session registration");
-            Session::new(session_id.to_string(), cwd.to_string(), AgentType::ClaudeCode)
+            info!(%session_id, %cwd, ?default_agent, "late session registration");
+            Session::new(session_id.to_string(), cwd.to_string(), default_agent)
         });
         session.touch();
         updater(session);
     }
 
-    /// Process an agent event and update session state
-    pub fn process_event(&mut self, event: AgentEvent) {
+    /// Process an agent event with an explicit default agent type for late registration.
+    ///
+    /// When a session is created implicitly (late registration), the given
+    /// `default_agent` is used instead of hardcoding `AgentType::ClaudeCode`.
+    pub fn process_event_from(&mut self, event: AgentEvent, default_agent: AgentType) {
         match event {
             AgentEvent::SessionStarted {
                 session_id,
@@ -186,10 +234,9 @@ impl SessionRegistry {
 
             AgentEvent::Activity { session_id, cwd } => {
                 trace!(%session_id, "activity");
-                self.update_session(&session_id, &cwd, |session| {
+                self.update_session(&session_id, &cwd, default_agent.clone(), |session| {
                     if session.state == SessionState::Idle || session.state == SessionState::Stale {
-                        session.state = SessionState::Running;
-                        session.clear_timestamps();
+                        session.transition_to_running();
                     }
                 });
             }
@@ -202,13 +249,8 @@ impl SessionRegistry {
                 tool_label,
             } => {
                 debug!(%session_id, %tool_name, "tool started");
-                self.update_session(&session_id, &cwd, |session| {
-                    session.state = SessionState::Running;
-                    session.clear_timestamps();
-                    session.permission_tool = None;
-                    session
-                        .running_tools
-                        .push(RunningTool { tool_id, tool_name, tool_label });
+                self.update_session(&session_id, &cwd, default_agent.clone(), |session| {
+                    session.add_tool(RunningTool { tool_id, tool_name, tool_label });
                 });
             }
 
@@ -218,27 +260,8 @@ impl SessionRegistry {
                 tool_id,
             } => {
                 debug!(%session_id, %tool_id, "tool completed");
-                self.update_session(&session_id, &cwd, |session| {
-                    if session.state != SessionState::Running {
-                        session.state = SessionState::Running;
-                        session.clear_timestamps();
-                        session.permission_tool = None;
-                    }
-                    if let Some(pos) =
-                        session.running_tools.iter().position(|t| t.tool_id == tool_id)
-                    {
-                        let tool = session.running_tools.remove(pos);
-                        let label = tool
-                            .tool_label
-                            .clone()
-                            .unwrap_or_else(|| tool.tool_name.clone());
-                        session.recent_tools.push(RecentTool {
-                            tool_name: tool.tool_name,
-                            tool_label: tool.tool_label,
-                            expires_at: Instant::now() + MIN_TOOL_DISPLAY,
-                        });
-                        session.push_recent_activity(label);
-                    }
+                self.update_session(&session_id, &cwd, default_agent.clone(), |session| {
+                    session.complete_tool(&tool_id);
                 });
             }
 
@@ -248,7 +271,7 @@ impl SessionRegistry {
                 message,
             } => {
                 info!(%session_id, "needs attention");
-                self.update_session(&session_id, &cwd, |session| {
+                self.update_session(&session_id, &cwd, default_agent.clone(), |session| {
                     session.state = SessionState::Attention;
                     session.permission_tool = message;
                 });
@@ -260,25 +283,22 @@ impl SessionRegistry {
                 message: _,
             } => {
                 info!(%session_id, "waiting for input");
-                self.update_session(&session_id, &cwd, |session| {
+                self.update_session(&session_id, &cwd, default_agent.clone(), |session| {
                     session.state = SessionState::Waiting;
                 });
             }
 
             AgentEvent::Compacting { session_id, cwd } => {
                 info!(%session_id, "compacting");
-                self.update_session(&session_id, &cwd, |session| {
+                self.update_session(&session_id, &cwd, default_agent.clone(), |session| {
                     session.state = SessionState::Compacting;
                 });
             }
 
             AgentEvent::Idle { session_id, cwd } => {
                 debug!(%session_id, "idle");
-                self.update_session(&session_id, &cwd, |session| {
-                    session.state = SessionState::Idle;
-                    session.running_tools.clear();
-                    session.stopped_at = Some(Instant::now());
-                    session.permission_tool = None;
+                self.update_session(&session_id, &cwd, default_agent, |session| {
+                    session.set_idle();
                 });
             }
 
@@ -296,6 +316,13 @@ impl SessionRegistry {
                 }
             }
         }
+    }
+
+    /// Process an agent event, defaulting to `AgentType::ClaudeCode` for late registration.
+    ///
+    /// This is the standard entry point used by the IPC/hook path (Claude Code).
+    pub fn process_event(&mut self, event: AgentEvent) {
+        self.process_event_from(event, AgentType::ClaudeCode);
     }
 
     /// Mark sessions as stale if no activity for the given duration
@@ -497,7 +524,7 @@ mod tests {
     fn late_session_registration() {
         let mut registry = SessionRegistry::new();
 
-        // Events for unknown session should auto-create the session
+        // Events for unknown session should auto-create with ClaudeCode default
         registry.process_event(AgentEvent::ToolStarted {
             session_id: "late".into(),
             cwd: "/tmp".into(),
@@ -510,6 +537,32 @@ mod tests {
         let sessions = registry.get_all();
         assert_eq!(sessions[0].session_id, "late");
         assert_eq!(sessions[0].running_tools.len(), 1);
+
+        // Verify agent defaults to ClaudeCode via process_event
+        let session = registry.sessions.get("late").unwrap();
+        assert_eq!(session.agent, AgentType::ClaudeCode);
+    }
+
+    #[test]
+    fn late_session_registration_codex() {
+        let mut registry = SessionRegistry::new();
+
+        // Events via process_event_from should use the provided default agent
+        registry.process_event_from(
+            AgentEvent::ToolStarted {
+                session_id: "late-codex".into(),
+                cwd: "/project".into(),
+                tool_id: "t1".into(),
+                tool_name: "npm".into(),
+                tool_label: Some("npm test".into()),
+            },
+            AgentType::Codex,
+        );
+
+        assert_eq!(registry.len(), 1);
+        let session = registry.sessions.get("late-codex").unwrap();
+        assert_eq!(session.agent, AgentType::Codex);
+        assert_eq!(session.running_tools.len(), 1);
     }
 
     #[test]

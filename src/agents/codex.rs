@@ -81,6 +81,7 @@ impl CodexClient {
         if !client.initialize(&reader).await {
             warn!("codex app-server initialize handshake failed");
             let _ = client.child.kill().await;
+            let _ = client.child.wait().await;
             return None;
         }
 
@@ -392,9 +393,7 @@ impl CodexClient {
                                 tool_label: item
                                     .get("filePath")
                                     .and_then(|v| v.as_str())
-                                    .map(|p| {
-                                        p.rsplit('/').next().unwrap_or(p).to_string()
-                                    }),
+                                    .map(super::short_path),
                             };
                             self.emit_event(event);
                         }
@@ -446,55 +445,74 @@ impl CodexClient {
     fn emit_event(&self, event: AgentEvent) {
         debug!(?event, "codex event");
         if let Ok(mut reg) = self.registry.lock() {
-            reg.process_event(event);
+            reg.process_event_from(event, AgentType::Codex);
             self.dirty.store(true, Ordering::Relaxed);
         }
     }
 }
 
+/// Minimum time a connection must last before backoff is reset.
+const STABLE_CONNECTION: Duration = Duration::from_secs(30);
+
 /// Start the Codex app-server client.
 ///
 /// Spawns `codex app-server`, initializes the handshake, discovers threads,
-/// and processes events in a loop. Automatically reconnects on failure.
+/// and processes events in a loop. Reconnects with exponential backoff
+/// (1 s → 60 s) on failure or disconnect. Backoff only resets after a
+/// connection stays up for [`STABLE_CONNECTION`].
 pub async fn start(registry: Arc<Mutex<SessionRegistry>>, dirty: Arc<AtomicBool>) {
-    let Some((mut client, mut reader)) = CodexClient::connect(
-        Arc::clone(&registry),
-        Arc::clone(&dirty),
-    )
-    .await
-    else {
-        info!("codex app-server not available, skipping");
-        return;
-    };
+    let mut backoff = Duration::from_secs(1);
+    const MAX_BACKOFF: Duration = Duration::from_secs(60);
 
-    // Initial thread discovery
-    if let Err(e) = client.list_threads().await {
-        warn!("failed to list codex threads: {}", e);
-    }
-
-    // Read and process messages
-    let mut poll_interval = tokio::time::interval(THREAD_POLL_INTERVAL);
     loop {
-        tokio::select! {
-            line = reader.next_line() => {
-                match line {
-                    Ok(Some(line)) if !line.is_empty() => {
-                        client.handle_message(&line).await;
+        match CodexClient::connect(Arc::clone(&registry), Arc::clone(&dirty)).await {
+            Some((mut client, mut reader)) => {
+                let connected_at = tokio::time::Instant::now();
+
+                if let Err(e) = client.list_threads().await {
+                    warn!("failed to list codex threads: {}", e);
+                }
+
+                let mut poll_interval = tokio::time::interval(THREAD_POLL_INTERVAL);
+                loop {
+                    tokio::select! {
+                        line = reader.next_line() => {
+                            match line {
+                                Ok(Some(line)) if !line.is_empty() => {
+                                    client.handle_message(&line).await;
+                                }
+                                Ok(None) | Err(_) => {
+                                    info!("codex app-server disconnected, reconnecting");
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ = poll_interval.tick() => {
+                            if let Err(e) = client.list_threads().await {
+                                debug!("thread poll failed: {}", e);
+                                break;
+                            }
+                        }
                     }
-                    Ok(None) | Err(_) => {
-                        info!("codex app-server disconnected");
-                        break;
-                    }
-                    _ => {}
+                }
+
+                // Best-effort kill and reap the child process to avoid zombies
+                let _ = client.child.kill().await;
+                let _ = client.child.wait().await;
+
+                // Only reset backoff if connection was stable
+                if connected_at.elapsed() >= STABLE_CONNECTION {
+                    backoff = Duration::from_secs(1);
                 }
             }
-            _ = poll_interval.tick() => {
-                if let Err(e) = client.list_threads().await {
-                    debug!("thread poll failed: {}", e);
-                    break;
-                }
+            None => {
+                debug!("codex app-server not available, retrying in {:?}", backoff);
             }
         }
+
+        tokio::time::sleep(backoff).await;
+        backoff = (backoff * 2).min(MAX_BACKOFF);
     }
 }
 
