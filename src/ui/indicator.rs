@@ -40,8 +40,8 @@ const ICON_WAITING: &str = "icons/fan.svg";
 const ICON_NO_SESSIONS: &str = "icons/panda.svg";
 
 /// Indicator state
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum IndicatorState {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IndicatorState {
     /// Any session needs attention - shaking circle with bell icon
     Attention,
     /// Any session waiting for user input
@@ -53,7 +53,7 @@ enum IndicatorState {
 }
 
 /// Determine the current indicator state from sessions
-fn determine_state(sessions: &[SessionInfo]) -> IndicatorState {
+pub(crate) fn determine_state(sessions: &[SessionInfo]) -> IndicatorState {
     if sessions.is_empty() {
         IndicatorState::NoSessions
     } else if sessions.iter().any(|s| s.state == SessionState::Attention) {
@@ -67,7 +67,7 @@ fn determine_state(sessions: &[SessionInfo]) -> IndicatorState {
 
 /// Get icon state for running animation - returns (current_icon, prev_icon, transition_progress)
 /// transition_progress: 0.0-1.0 during first 400ms of cycle, 1.0 after transition complete
-fn get_running_icon_state(animation_start: Instant) -> (&'static str, &'static str, f32) {
+pub(crate) fn get_running_icon_state(animation_start: Instant) -> (&'static str, &'static str, f32) {
     let elapsed_ms = animation_start.elapsed().as_millis() as u64;
     let icon_count = icons::INDICATOR_RUNNING_ASSETS.len();
 
@@ -292,4 +292,123 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bo
                     },
                 ),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{SessionInfo, SessionState};
+    use std::time::{Duration, Instant};
+
+    fn make_session(state: SessionState) -> SessionInfo {
+        SessionInfo {
+            session_id: "test".into(),
+            cwd: "/tmp".into(),
+            state,
+            running_tools: vec![],
+            name: None,
+            stopped_at: None,
+            stale_at: None,
+            permission_tool: None,
+            recent_activity: vec![],
+        }
+    }
+
+    // -- Indicator state determination --
+
+    #[test]
+    fn determine_state_no_sessions() {
+        assert_eq!(determine_state(&[]), IndicatorState::NoSessions);
+    }
+
+    #[test]
+    fn determine_state_one_running() {
+        let sessions = vec![make_session(SessionState::Running)];
+        assert_eq!(determine_state(&sessions), IndicatorState::Running);
+    }
+
+    #[test]
+    fn determine_state_attention_priority() {
+        let sessions = vec![
+            make_session(SessionState::Running),
+            make_session(SessionState::Attention),
+        ];
+        assert_eq!(determine_state(&sessions), IndicatorState::Attention);
+    }
+
+    #[test]
+    fn determine_state_waiting_no_attention() {
+        let sessions = vec![
+            make_session(SessionState::Running),
+            make_session(SessionState::Waiting),
+        ];
+        assert_eq!(determine_state(&sessions), IndicatorState::Waiting);
+    }
+
+    #[test]
+    fn determine_state_all_idle_stale() {
+        let sessions = vec![
+            make_session(SessionState::Idle),
+            make_session(SessionState::Stale),
+        ];
+        assert_eq!(determine_state(&sessions), IndicatorState::Running);
+    }
+
+    #[test]
+    fn determine_state_attention_over_waiting() {
+        let sessions = vec![
+            make_session(SessionState::Waiting),
+            make_session(SessionState::Attention),
+        ];
+        assert_eq!(determine_state(&sessions), IndicatorState::Attention);
+    }
+
+    // -- Running icon cycling --
+
+    #[test]
+    fn running_icon_at_start() {
+        let start = Instant::now(); // elapsed ~ 0ms
+        let (current, prev, progress) = get_running_icon_state(start);
+        assert_eq!(current, icons::INDICATOR_RUNNING_ASSETS[0]);
+        assert_eq!(
+            prev,
+            icons::INDICATOR_RUNNING_ASSETS[icons::INDICATOR_RUNNING_ASSETS.len() - 1]
+        );
+        assert!(progress < 0.1); // Near start of transition
+    }
+
+    #[test]
+    fn running_icon_mid_transition() {
+        let start = Instant::now() - Duration::from_millis(200); // elapsed ~ 200ms
+        let (_, _, progress) = get_running_icon_state(start);
+        assert!(
+            progress > 0.3 && progress < 0.7,
+            "progress={}",
+            progress
+        );
+    }
+
+    #[test]
+    fn running_icon_after_transition() {
+        let start = Instant::now() - Duration::from_millis(500); // elapsed ~ 500ms, past 400ms transition
+        let (_, _, progress) = get_running_icon_state(start);
+        assert_eq!(progress, 1.0);
+    }
+
+    #[test]
+    fn running_icon_second_cycle() {
+        let start = Instant::now() - Duration::from_millis(2500); // elapsed = 2500ms = 1 full cycle
+        let (current, _, _) = get_running_icon_state(start);
+        assert_eq!(current, icons::INDICATOR_RUNNING_ASSETS[1]);
+    }
+
+    #[test]
+    fn running_icon_wraps_around() {
+        let icon_count = icons::INDICATOR_RUNNING_ASSETS.len();
+        // After icon_count full cycles, wraps back to first icon
+        let elapsed = icon_count as u64 * 2500;
+        let start = Instant::now() - Duration::from_millis(elapsed);
+        let (current, _, _) = get_running_icon_state(start);
+        assert_eq!(current, icons::INDICATOR_RUNNING_ASSETS[0]);
+    }
 }

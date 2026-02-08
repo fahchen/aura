@@ -141,7 +141,7 @@ fn render_session_event(
 }
 
 /// Format a Unix timestamp as "Jan 17, 14:30"
-fn format_datetime(unix_ts: u64) -> String {
+pub(crate) fn format_datetime(unix_ts: u64) -> String {
     let datetime = DateTime::<Utc>::from_timestamp(unix_ts as i64, 0).unwrap_or_else(Utc::now);
     let local: DateTime<Local> = datetime.into();
     local.format("%b %d, %H:%M").to_string()
@@ -149,7 +149,7 @@ fn format_datetime(unix_ts: u64) -> String {
 
 /// Get a stable placeholder text for Running state based on session_id hash
 /// This prevents flickering that would occur if we used time-based random selection
-fn get_stable_placeholder(session_id: &str) -> &'static str {
+pub(crate) fn get_stable_placeholder(session_id: &str) -> &'static str {
     // Use session_id hash for stable but varied selection
     let hash = session_id.bytes().fold(0usize, |acc, b| {
         acc.wrapping_mul(31).wrapping_add(b as usize)
@@ -159,7 +159,7 @@ fn get_stable_placeholder(session_id: &str) -> &'static str {
 }
 
 /// Get state-specific placeholder text based on session state
-fn get_placeholder_text(session: &SessionInfo) -> String {
+pub(crate) fn get_placeholder_text(session: &SessionInfo) -> String {
     match session.state {
         SessionState::Idle => {
             if let Some(ts) = session.stopped_at {
@@ -266,11 +266,11 @@ fn render_tool_or_placeholder(
             .child(render_placeholder(&placeholder_text, icon_path, theme));
     }
 
-    // Render tools with cross-fade animation
+    // Render tools with vertical slide (ticker) animation
     render_current_tool(&session.running_tools, tool_index, fade_progress, theme)
 }
 
-/// Render current tool with cross-fade animation
+/// Render current tool with vertical slide (ticker) animation
 /// Shows one tool at a time, cycling through the list
 fn render_current_tool(tools: &[RunningTool], tool_index: usize, fade_progress: f32, theme: &ThemeColors) -> Div {
     // Get current and next tool indices
@@ -289,14 +289,14 @@ fn render_current_tool(tools: &[RunningTool], tool_index: usize, fade_progress: 
     let current_y_offset = -progress * slide_distance; // slides up
     let next_y_offset = (1.0 - progress) * slide_distance; // slides down from above
 
-    // Stack both tools with cross-fade opacity using a relative container
+    // Stack both tools with vertical slide (ticker) using a relative container
     div()
         .flex_1()
         .min_w_0() // Allow shrinking for text ellipsis
         .h(px(18.0))
         .relative()
         .overflow_hidden()
-        // Current tool (fading out, sliding up)
+        // Current tool (sliding up and out)
         .child(
             div()
                 .absolute()
@@ -310,7 +310,7 @@ fn render_current_tool(tools: &[RunningTool], tool_index: usize, fade_progress: 
                 .opacity(current_opacity)
                 .child(render_tool_with_icon(current_tool, theme)),
         )
-        // Next tool (fading in, sliding down from above)
+        // Next tool (sliding up from below)
         .child(
             div()
                 .absolute()
@@ -327,7 +327,7 @@ fn render_current_tool(tools: &[RunningTool], tool_index: usize, fade_progress: 
 }
 
 /// Rotate through recent activity without repeats.
-fn get_recent_activity_text(session: &SessionInfo, animation_start: Instant) -> Option<String> {
+pub(crate) fn get_recent_activity_text(session: &SessionInfo, animation_start: Instant) -> Option<String> {
     let items = &session.recent_activity;
     if items.is_empty() {
         return None;
@@ -365,25 +365,28 @@ fn render_activity_text(text: &str, theme: &ThemeColors) -> Div {
 /// Icon width for consistent alignment
 const TOOL_ICON_WIDTH: f32 = 12.0;
 
+/// Format the display text for a tool, handling MCP server prefixes and special cases.
+pub(crate) fn format_tool_display_text(tool_name: &str, tool_label: Option<&str>) -> String {
+    if tool_name.starts_with("mcp__") {
+        let parts: Vec<&str> = tool_name.split("__").collect();
+        if parts.len() >= 3 {
+            let server = parts[1];
+            let func = tool_label.unwrap_or(parts[2]);
+            format!("{}: {}", server, func)
+        } else {
+            tool_label.unwrap_or(tool_name).to_string()
+        }
+    } else if tool_name == "WebFetch" && tool_label.is_none() {
+        "fetching...".to_string()
+    } else {
+        tool_label.unwrap_or(tool_name).to_string()
+    }
+}
+
 /// Render a tool with its SVG icon (using theme colors)
 pub(crate) fn render_tool_with_icon(tool: &RunningTool, theme: &ThemeColors) -> Div {
     let icon_path = icons::tool_icon_asset(&tool.tool_name);
-    let display_text = if tool.tool_name.starts_with("mcp__") {
-        // Extract server name from mcp__server__function format
-        let parts: Vec<&str> = tool.tool_name.split("__").collect();
-        if parts.len() >= 3 {
-            let server = parts[1];
-            let func = tool.tool_label.as_deref().unwrap_or(parts[2]);
-            format!("{}: {}", server, func)
-        } else {
-            tool.tool_label.clone().unwrap_or_else(|| tool.tool_name.clone())
-        }
-    } else if tool.tool_name == "WebFetch" && tool.tool_label.is_none() {
-        // WebFetch without label shows "fetching..." placeholder
-        "fetching...".to_string()
-    } else {
-        tool.tool_label.as_deref().unwrap_or(&tool.tool_name).to_string()
-    };
+    let display_text = format_tool_display_text(&tool.tool_name, tool.tool_label.as_deref());
 
     div()
         .w_full() // Fill parent container width
@@ -533,7 +536,7 @@ fn render_state_indicator(
 }
 
 /// Get opacity for session state (from prototype)
-fn state_to_opacity(state: SessionState) -> f32 {
+pub(crate) fn state_to_opacity(state: SessionState) -> f32 {
     match state {
         SessionState::Running | SessionState::Attention | SessionState::Waiting => 1.0,
         SessionState::Compacting => 0.9,
@@ -549,4 +552,216 @@ pub(crate) fn calculate_expanded_height(session_count: usize) -> f32 {
     let count = session_count.min(MAX_SESSIONS);
     // Header (28px) + rows + container padding (10px top + 10px bottom)
     HEADER_HEIGHT + (ROW_HEIGHT + ROW_GAP) * count as f32 + 20.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{SessionInfo, SessionState};
+
+    fn make_session(state: SessionState) -> SessionInfo {
+        SessionInfo {
+            session_id: "test-session".into(),
+            cwd: "/home/user/project".into(),
+            state,
+            running_tools: vec![],
+            name: None,
+            stopped_at: None,
+            stale_at: None,
+            permission_tool: None,
+            recent_activity: vec![],
+        }
+    }
+
+    // --- extract_session_name tests ---
+
+    #[test]
+    fn session_name_from_path() {
+        assert_eq!(extract_session_name("/home/user/project"), "project");
+    }
+
+    #[test]
+    fn session_name_from_root() {
+        assert_eq!(extract_session_name("/"), "session");
+    }
+
+    #[test]
+    fn session_name_from_empty() {
+        assert_eq!(extract_session_name(""), "session");
+    }
+
+    // --- get_placeholder_text tests ---
+
+    #[test]
+    fn placeholder_running() {
+        let session = make_session(SessionState::Running);
+        let text = get_placeholder_text(&session);
+        assert!(
+            crate::PLACEHOLDER_TEXTS.contains(&text.as_str()),
+            "got: {}",
+            text
+        );
+    }
+
+    #[test]
+    fn placeholder_idle_with_timestamp() {
+        let mut session = make_session(SessionState::Idle);
+        session.stopped_at = Some(1705500600); // Jan 17, 2024, 14:30 UTC
+        let text = get_placeholder_text(&session);
+        assert!(text.starts_with("waiting since "), "got: {}", text);
+    }
+
+    #[test]
+    fn placeholder_idle_without_timestamp() {
+        let session = make_session(SessionState::Idle);
+        assert_eq!(get_placeholder_text(&session), "waiting...");
+    }
+
+    #[test]
+    fn placeholder_stale_with_timestamp() {
+        let mut session = make_session(SessionState::Stale);
+        session.stale_at = Some(1705500600);
+        let text = get_placeholder_text(&session);
+        assert!(text.starts_with("inactive since "), "got: {}", text);
+    }
+
+    #[test]
+    fn placeholder_attention_with_tool() {
+        let mut session = make_session(SessionState::Attention);
+        session.permission_tool = Some("Read".into());
+        assert_eq!(get_placeholder_text(&session), "Read needs permission");
+    }
+
+    #[test]
+    fn placeholder_waiting() {
+        let session = make_session(SessionState::Waiting);
+        assert_eq!(get_placeholder_text(&session), "waiting for input");
+    }
+
+    #[test]
+    fn placeholder_compacting() {
+        let session = make_session(SessionState::Compacting);
+        assert_eq!(get_placeholder_text(&session), "compacting context...");
+    }
+
+    // --- get_stable_placeholder tests ---
+
+    #[test]
+    fn stable_placeholder_deterministic() {
+        let a = get_stable_placeholder("session-abc");
+        let b = get_stable_placeholder("session-abc");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn stable_placeholder_varies() {
+        let a = get_stable_placeholder("session-abc");
+        let b = get_stable_placeholder("session-xyz-different");
+        // Both must be valid placeholders regardless of whether they happen to match
+        assert!(crate::PLACEHOLDER_TEXTS.contains(&a));
+        assert!(crate::PLACEHOLDER_TEXTS.contains(&b));
+    }
+
+    // --- state_to_opacity tests ---
+
+    #[test]
+    fn opacity_running_states() {
+        assert_eq!(state_to_opacity(SessionState::Running), 1.0);
+        assert_eq!(state_to_opacity(SessionState::Attention), 1.0);
+        assert_eq!(state_to_opacity(SessionState::Waiting), 1.0);
+    }
+
+    #[test]
+    fn opacity_compacting() {
+        assert_eq!(state_to_opacity(SessionState::Compacting), 0.9);
+    }
+
+    #[test]
+    fn opacity_idle_stale() {
+        assert_eq!(state_to_opacity(SessionState::Idle), 0.8);
+        assert_eq!(state_to_opacity(SessionState::Stale), 0.8);
+    }
+
+    // --- get_recent_activity_text tests ---
+
+    #[test]
+    fn recent_activity_empty() {
+        let session = make_session(SessionState::Running);
+        let text = get_recent_activity_text(&session, Instant::now());
+        assert!(text.is_none());
+    }
+
+    #[test]
+    fn recent_activity_single_item() {
+        let mut session = make_session(SessionState::Running);
+        session.recent_activity = vec!["main.rs".into()];
+        let text = get_recent_activity_text(&session, Instant::now());
+        assert_eq!(text, Some("main.rs".into()));
+    }
+
+    #[test]
+    fn recent_activity_cycles() {
+        let mut session = make_session(SessionState::Running);
+        session.recent_activity = vec!["a".into(), "b".into(), "c".into()];
+        // At t=0, idx = (0/3) % 3 = 0 -> "a"
+        let text = get_recent_activity_text(&session, Instant::now());
+        assert_eq!(text, Some("a".into()));
+        // At t=3s, idx = (3/3) % 3 = 1 -> "b"
+        let start = Instant::now() - std::time::Duration::from_secs(3);
+        let text = get_recent_activity_text(&session, start);
+        assert_eq!(text, Some("b".into()));
+    }
+
+    // --- calculate_expanded_height tests ---
+
+    #[test]
+    fn expanded_height_one_session() {
+        let expected = HEADER_HEIGHT + (ROW_HEIGHT + ROW_GAP) * 1.0 + 20.0;
+        assert_eq!(calculate_expanded_height(1), expected);
+    }
+
+    #[test]
+    fn expanded_height_max_sessions() {
+        let expected = HEADER_HEIGHT + (ROW_HEIGHT + ROW_GAP) * 5.0 + 20.0;
+        assert_eq!(calculate_expanded_height(5), expected);
+    }
+
+    #[test]
+    fn expanded_height_capped() {
+        // 10 sessions should be capped at MAX_SESSIONS (5)
+        assert_eq!(calculate_expanded_height(10), calculate_expanded_height(5));
+    }
+
+    // --- format_tool_display_text tests ---
+
+    #[test]
+    fn format_mcp_tool_with_label() {
+        assert_eq!(
+            format_tool_display_text("mcp__github__search", Some("react")),
+            "github: react"
+        );
+    }
+
+    #[test]
+    fn format_mcp_tool_without_label() {
+        assert_eq!(
+            format_tool_display_text("mcp__memory__create_entities", None),
+            "memory: create_entities"
+        );
+    }
+
+    #[test]
+    fn format_regular_tool_with_label() {
+        assert_eq!(format_tool_display_text("Read", Some("main.rs")), "main.rs");
+    }
+
+    #[test]
+    fn format_regular_tool_without_label() {
+        assert_eq!(format_tool_display_text("Read", None), "Read");
+    }
+
+    #[test]
+    fn format_webfetch_without_label() {
+        assert_eq!(format_tool_display_text("WebFetch", None), "fetching...");
+    }
 }

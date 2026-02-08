@@ -251,4 +251,76 @@ mod tests {
             opacity
         );
     }
+
+    #[test]
+    fn test_ease_out() {
+        assert_eq!(ease_out(0.0), 0.0);
+        assert_eq!(ease_out(1.0), 1.0);
+        // ease_out should be above linear for mid values
+        assert!(ease_out(0.5) > 0.5);
+    }
+
+    #[test]
+    fn test_row_slide_in_complete() {
+        // After animation time passes, should be fully visible
+        let start = Instant::now() - std::time::Duration::from_millis(ROW_SLIDE_IN_MS + 100);
+        let (opacity, x_offset) = calculate_row_slide_in(start);
+        assert_eq!(opacity, 1.0);
+        assert_eq!(x_offset, 0.0);
+    }
+
+    #[test]
+    fn test_row_slide_in_start() {
+        // At start, opacity and position should be at initial values
+        let start = Instant::now();
+        let (opacity, x_offset) = calculate_row_slide_in(start);
+        assert!(opacity < 0.1, "Initial opacity should be near 0, got {}", opacity);
+        assert!(x_offset < -10.0, "Initial x_offset should be near -12, got {}", x_offset);
+    }
+
+    #[test]
+    fn test_row_slide_out_complete() {
+        let start = Instant::now() - std::time::Duration::from_millis(ROW_SLIDE_OUT_MS + 100);
+        let (opacity, x_offset, done) = calculate_row_slide_out(start);
+        assert_eq!(opacity, 0.0);
+        assert_eq!(x_offset, 12.0);
+        assert!(done);
+    }
+
+    #[test]
+    fn test_row_slide_out_start() {
+        let start = Instant::now();
+        let (opacity, x_offset, done) = calculate_row_slide_out(start);
+        assert!(opacity > 0.9, "Initial opacity should be near 1.0");
+        assert!(x_offset < 1.0, "Initial x_offset should be near 0");
+        assert!(!done);
+    }
+
+    #[test]
+    fn test_icon_swap_no_hover() {
+        let (state_opacity, state_x, remove_opacity, remove_x) = calculate_icon_swap(None, false);
+        assert_eq!(state_opacity, 1.0);
+        assert_eq!(state_x, 0.0);
+        assert_eq!(remove_opacity, 0.0);
+        assert_eq!(remove_x, -16.0);
+    }
+
+    #[test]
+    fn test_animation_state_initial() {
+        let start = Instant::now();
+        let (tool_index, fade_progress) = calculate_animation_state(start, 42);
+        assert_eq!(tool_index, 0);
+        assert_eq!(fade_progress, 0.0);
+    }
+
+    #[test]
+    fn test_cycle_hash_different_inputs() {
+        // Different cycle numbers should give different hashes
+        let h1 = cycle_hash(0, 42);
+        let h2 = cycle_hash(1, 42);
+        assert_ne!(h1, h2);
+        // Different seeds should give different hashes
+        let h3 = cycle_hash(0, 100);
+        assert_ne!(h1, h3);
+    }
 }

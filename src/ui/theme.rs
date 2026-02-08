@@ -42,6 +42,28 @@ impl ThemeStyle {
         }
     }
 
+    /// Create from config string representation.
+    pub fn from_config_str(s: &str) -> Self {
+        match s {
+            "liquid-dark" => Self::LiquidDark,
+            "liquid-light" => Self::LiquidLight,
+            "solid-dark" => Self::SolidDark,
+            "solid-light" => Self::SolidLight,
+            _ => Self::System,
+        }
+    }
+
+    /// Convert to config string representation.
+    pub fn to_config_str(&self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::LiquidDark => "liquid-dark",
+            Self::LiquidLight => "liquid-light",
+            Self::SolidDark => "solid-dark",
+            Self::SolidLight => "solid-light",
+        }
+    }
+
     /// Cycle to next theme style
     pub fn next(&self) -> Self {
         match self {
@@ -220,8 +242,8 @@ impl ThemeColors {
             // Indicator
             indicator_icon:  (1.0, 0.95),
             indicator_border: (1.0, 0.10),
-            // No shadow for liquid themes
-            use_shadow: false,
+            // Shadow for liquid themes
+            use_shadow: true,
         })
     }
 
@@ -253,8 +275,8 @@ impl ThemeColors {
             // Indicator
             indicator_icon:  (0.10, 1.0),  // #1A1A1A
             indicator_border: (0.0, 0.08),
-            // No shadow for liquid themes
-            use_shadow: false,
+            // Shadow for liquid themes
+            use_shadow: true,
         })
     }
 
@@ -339,4 +361,30 @@ impl ThemeColors {
 
 /// macOS window corner radius
 pub const WINDOW_RADIUS: f32 = 16.0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_str_roundtrip() {
+        for style in [
+            ThemeStyle::System,
+            ThemeStyle::LiquidDark,
+            ThemeStyle::LiquidLight,
+            ThemeStyle::SolidDark,
+            ThemeStyle::SolidLight,
+        ] {
+            let s = style.to_config_str();
+            let back = ThemeStyle::from_config_str(s);
+            assert_eq!(back, style);
+        }
+    }
+
+    #[test]
+    fn config_str_unknown_defaults_to_system() {
+        assert_eq!(ThemeStyle::from_config_str("unknown"), ThemeStyle::System);
+        assert_eq!(ThemeStyle::from_config_str(""), ThemeStyle::System);
+    }
+}
 
