@@ -170,9 +170,6 @@ impl Session {
             stopped_at: self.stopped_at.map(instant_to_unix_timestamp),
             stale_at: self.stale_at.map(instant_to_unix_timestamp),
             permission_tool: self.permission_tool.clone(),
-            git_branch: None,
-            message_count: None,
-            last_prompt_preview: None,
             recent_activity: self.recent_activity.iter().cloned().collect(),
         }
     }
@@ -325,10 +322,19 @@ impl SessionRegistry {
         self.process_event_from(event, AgentType::ClaudeCode);
     }
 
+    /// Returns the earliest `Instant` at which a non-stale session will become
+    /// stale, or `None` if no sessions are candidates for going stale.
+    pub fn next_stale_at(&self, timeout: Duration) -> Option<Instant> {
+        self.sessions
+            .values()
+            .filter(|s| s.state != SessionState::Stale)
+            .map(|s| s.last_activity + timeout)
+            .min()
+    }
+
     /// Mark sessions as stale if no activity for the given duration
     pub fn mark_stale(&mut self, timeout: Duration) {
         let now = Instant::now();
-        let mut remove_ids = Vec::new();
         for session in self.sessions.values_mut() {
             // Clean up expired recent tools
             session.recent_tools.retain(|t| t.expires_at > now);
@@ -342,17 +348,7 @@ impl SessionRegistry {
                     session.state = SessionState::Stale;
                     session.stale_at = Some(Instant::now());
                 }
-
-                // Codex sessions do not emit explicit end events reliably.
-                // Remove them once they go stale to keep the list accurate.
-                if session.agent == AgentType::Codex {
-                    remove_ids.push(session.session_id.clone());
-                }
             }
-        }
-
-        for session_id in remove_ids {
-            self.sessions.remove(&session_id);
         }
     }
 
@@ -763,5 +759,182 @@ mod tests {
 
         let sessions = registry.get_all();
         assert_eq!(sessions[0].state, SessionState::Waiting);
+    }
+
+    #[test]
+    fn codex_sessions_stay_when_stale() {
+        let mut registry = SessionRegistry::new();
+
+        registry.process_event_from(
+            AgentEvent::SessionStarted {
+                session_id: "codex-1".into(),
+                cwd: "/project".into(),
+                agent: AgentType::Codex,
+            },
+            AgentType::Codex,
+        );
+
+        // Set last_activity to the past
+        {
+            let session = registry.sessions.get_mut("codex-1").unwrap();
+            session.last_activity = Instant::now() - Duration::from_secs(700);
+        }
+
+        registry.mark_stale(Duration::from_secs(600));
+
+        // Session should still exist but be Stale
+        assert_eq!(registry.len(), 1);
+        let session = registry.sessions.get("codex-1").unwrap();
+        assert_eq!(session.state, SessionState::Stale);
+    }
+
+    #[test]
+    fn next_stale_at_returns_earliest() {
+        let mut registry = SessionRegistry::new();
+
+        // No sessions -> None
+        assert!(registry.next_stale_at(Duration::from_secs(600)).is_none());
+
+        // Add a session
+        registry.process_event(AgentEvent::SessionStarted {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            agent: AgentType::ClaudeCode,
+        });
+
+        // Should have a future stale time
+        let next = registry.next_stale_at(Duration::from_secs(600));
+        assert!(next.is_some());
+        assert!(next.unwrap() > Instant::now());
+
+        // Stale sessions should be excluded
+        {
+            let session = registry.sessions.get_mut("s1").unwrap();
+            session.state = SessionState::Stale;
+        }
+        assert!(registry.next_stale_at(Duration::from_secs(600)).is_none());
+    }
+
+    #[test]
+    fn session_name_update_flow() {
+        let mut registry = SessionRegistry::new();
+
+        registry.process_event(AgentEvent::SessionStarted {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            agent: AgentType::ClaudeCode,
+        });
+
+        // Initially no name
+        let sessions = registry.get_all();
+        assert!(sessions[0].name.is_none());
+
+        // Update name
+        registry.process_event(AgentEvent::SessionNameUpdated {
+            session_id: "s1".into(),
+            name: "fix login bug".into(),
+        });
+
+        let sessions = registry.get_all();
+        assert_eq!(sessions[0].name, Some("fix login bug".into()));
+    }
+
+    #[test]
+    fn compacting_returns_to_running_on_activity() {
+        let mut registry = SessionRegistry::new();
+
+        registry.process_event(AgentEvent::SessionStarted {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            agent: AgentType::ClaudeCode,
+        });
+
+        registry.process_event(AgentEvent::Compacting {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+        });
+        assert_eq!(registry.get_all()[0].state, SessionState::Compacting);
+
+        // Tool start should return to Running
+        registry.process_event(AgentEvent::ToolStarted {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            tool_id: "t1".into(),
+            tool_name: "Read".into(),
+            tool_label: None,
+        });
+        assert_eq!(registry.get_all()[0].state, SessionState::Running);
+    }
+
+    #[test]
+    fn stale_to_running_on_activity() {
+        let mut registry = SessionRegistry::new();
+
+        registry.process_event(AgentEvent::SessionStarted {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            agent: AgentType::ClaudeCode,
+        });
+
+        // Make it stale
+        {
+            let session = registry.sessions.get_mut("s1").unwrap();
+            session.last_activity = Instant::now() - Duration::from_secs(700);
+        }
+        registry.mark_stale(Duration::from_secs(600));
+        assert_eq!(registry.get_all()[0].state, SessionState::Stale);
+
+        // Activity should return to Running
+        registry.process_event(AgentEvent::Activity {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+        });
+        assert_eq!(registry.get_all()[0].state, SessionState::Running);
+    }
+
+    #[test]
+    fn recent_activity_tracking() {
+        let mut registry = SessionRegistry::new();
+
+        registry.process_event(AgentEvent::SessionStarted {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            agent: AgentType::ClaudeCode,
+        });
+
+        // Complete tools to build activity
+        for i in 0..3 {
+            registry.process_event(AgentEvent::ToolStarted {
+                session_id: "s1".into(),
+                cwd: "/tmp".into(),
+                tool_id: format!("t{}", i),
+                tool_name: "Read".into(),
+                tool_label: Some(format!("file{}.rs", i)),
+            });
+            registry.process_event(AgentEvent::ToolCompleted {
+                session_id: "s1".into(),
+                cwd: "/tmp".into(),
+                tool_id: format!("t{}", i),
+            });
+        }
+
+        let sessions = registry.get_all();
+        assert_eq!(sessions[0].recent_activity.len(), 3);
+    }
+
+    #[test]
+    fn remove_session_from_registry() {
+        let mut registry = SessionRegistry::new();
+
+        registry.process_event(AgentEvent::SessionStarted {
+            session_id: "s1".into(),
+            cwd: "/tmp".into(),
+            agent: AgentType::ClaudeCode,
+        });
+        assert_eq!(registry.len(), 1);
+
+        registry.remove_session("s1");
+        assert_eq!(registry.len(), 0);
+        assert!(registry.is_empty());
     }
 }

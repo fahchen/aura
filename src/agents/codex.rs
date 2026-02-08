@@ -615,4 +615,89 @@ mod tests {
         assert_eq!(sessions[0].running_tools.len(), 1);
         assert_eq!(sessions[0].running_tools[0].tool_name, "npm");
     }
+
+    #[test]
+    fn handle_turn_completed_notification() {
+        let (reg, _dirty) = make_registry();
+
+        // Simulate turn/completed notification
+        let params: Value = serde_json::json!({
+            "threadId": "thr_1",
+            "turn": { "id": "turn_1", "status": "completed" }
+        });
+
+        let thread_id = params
+            .get("threadId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+
+        if let Ok(mut r) = reg.lock() {
+            r.process_event(AgentEvent::SessionStarted {
+                session_id: "thr_1".into(),
+                cwd: String::new(),
+                agent: AgentType::Codex,
+            });
+            r.process_event(AgentEvent::Idle {
+                session_id: thread_id.to_string(),
+                cwd: String::new(),
+            });
+        }
+
+        let sessions = reg.lock().unwrap().get_all();
+        assert_eq!(sessions[0].state, crate::SessionState::Idle);
+    }
+
+    #[test]
+    fn handle_item_started_file_change() {
+        let (reg, _dirty) = make_registry();
+        let item: Value = serde_json::json!({
+            "type": "fileChange",
+            "id": "item_2",
+            "filePath": "/project/src/main.rs"
+        });
+
+        let item_type = item.get("type").and_then(|v| v.as_str()).unwrap();
+        assert_eq!(item_type, "fileChange");
+
+        let file_path = item.get("filePath").and_then(|v| v.as_str()).unwrap();
+        let label = super::super::short_path(file_path);
+        assert_eq!(label, "main.rs");
+
+        if let Ok(mut r) = reg.lock() {
+            r.process_event(AgentEvent::SessionStarted {
+                session_id: "thr_1".into(),
+                cwd: "/project".into(),
+                agent: AgentType::Codex,
+            });
+            r.process_event(AgentEvent::ToolStarted {
+                session_id: "thr_1".into(),
+                cwd: String::new(),
+                tool_id: "item_2".into(),
+                tool_name: "FileChange".into(),
+                tool_label: Some("main.rs".into()),
+            });
+        }
+
+        let sessions = reg.lock().unwrap().get_all();
+        assert_eq!(sessions[0].running_tools.len(), 1);
+        assert_eq!(sessions[0].running_tools[0].tool_name, "FileChange");
+    }
+
+    #[test]
+    fn thread_id_extraction() {
+        let params: Value = serde_json::json!({ "threadId": "thr_abc" });
+        let tid = super::thread_id(&params, None);
+        assert_eq!(tid, "thr_abc");
+
+        // With fallback
+        let params2: Value = serde_json::json!({});
+        let fallback: Value = serde_json::json!({ "threadId": "thr_fallback" });
+        let tid2 = super::thread_id(&params2, Some(&fallback));
+        assert_eq!(tid2, "thr_fallback");
+
+        // No threadId anywhere
+        let params3: Value = serde_json::json!({});
+        let tid3 = super::thread_id(&params3, None);
+        assert_eq!(tid3, "unknown");
+    }
 }
