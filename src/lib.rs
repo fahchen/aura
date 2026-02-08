@@ -1,5 +1,6 @@
 //! Aura — HUD for AI coding agents
 
+pub mod config;
 mod event;
 pub mod ipc;
 mod session;
