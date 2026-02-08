@@ -29,15 +29,6 @@ pub struct SessionInfo {
     /// Tool requesting permission
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_tool: Option<String>,
-    /// Git branch from transcript
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub git_branch: Option<String>,
-    /// Total message count in transcript
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message_count: Option<u32>,
-    /// Preview of last user prompt
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_prompt_preview: Option<String>,
     /// Recent activity labels (most recent last)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_activity: Vec<String>,

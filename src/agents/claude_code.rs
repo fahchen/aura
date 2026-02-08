@@ -17,46 +17,12 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 
 /// Agent identifier for the `--agent` CLI flag.
-#[derive(Debug, Clone, clap::ValueEnum)]
+#[derive(Debug, Clone, PartialEq, clap::ValueEnum)]
 pub enum HookAgent {
     ClaudeCode,
     Codex,
     GeminiCli,
     OpenCode,
-}
-
-/// All Claude Code hook events that Aura subscribes to.
-const CLAUDE_CODE_HOOK_EVENTS: &[&str] = &[
-    "SessionStart",
-    "PreToolUse",
-    "PostToolUse",
-    "PostToolUseFailure",
-    "Notification",
-    "PermissionRequest",
-    "Stop",
-    "PreCompact",
-    "SessionEnd",
-    "UserPromptSubmit",
-];
-
-/// Print Claude Code hooks config JSON for `~/.claude/settings.json`.
-pub fn print_install_config() {
-    let hook_obj = serde_json::json!({
-        "type": "command",
-        "command": "aura hook --agent claude-code"
-    });
-
-    let mut hooks = serde_json::Map::new();
-    for event in CLAUDE_CODE_HOOK_EVENTS {
-        hooks.insert(
-            event.to_string(),
-            serde_json::json!([{ "hooks": [hook_obj] }]),
-        );
-    }
-
-    let output = serde_json::to_string_pretty(&serde_json::Value::Object(hooks)).unwrap();
-    println!("Add the following to your ~/.claude/settings.json under \"hooks\":\n");
-    println!("{output}");
 }
 
 /// Entry point for `aura hook` subcommand.
@@ -139,13 +105,26 @@ fn convert_claude_code(hook: &Value) -> Option<Vec<AgentEvent>> {
                 .to_string();
             let tool_label = extract_tool_label(hook);
 
-            vec![AgentEvent::ToolStarted {
-                session_id,
+            let mut events = vec![AgentEvent::ToolStarted {
+                session_id: session_id.clone(),
                 cwd,
                 tool_id,
-                tool_name,
+                tool_name: tool_name.clone(),
                 tool_label,
-            }]
+            }];
+
+            if tool_name == "Bash" {
+                if let Some(tool_input) = hook.get("tool_input") {
+                    if let Some(name) = parse_set_name_command(tool_input) {
+                        events.push(AgentEvent::SessionNameUpdated {
+                            session_id,
+                            name,
+                        });
+                    }
+                }
+            }
+
+            events
         }
 
         "PostToolUse" | "PostToolUseFailure" => {
@@ -241,6 +220,46 @@ fn convert_claude_code(hook: &Value) -> Option<Vec<AgentEvent>> {
     Some(messages)
 }
 
+/// Parse `aura set-name "..."` from a Bash tool_input's `command` field.
+///
+/// Supports double quotes, single quotes, and unquoted single-token names.
+/// Returns the extracted name, or `None` if the command is not an `aura set-name` invocation.
+fn parse_set_name_command(tool_input: &Value) -> Option<String> {
+    let command = tool_input.get("command")?.as_str()?;
+    let trimmed = command.trim();
+
+    // Use split_whitespace to skip arbitrary interior whitespace, then verify
+    // the first two tokens are "aura" and "set-name".
+    let mut tokens = trimmed.split_whitespace();
+    if tokens.next() != Some("aura") {
+        return None;
+    }
+    if tokens.next() != Some("set-name") {
+        return None;
+    }
+
+    // Find where the name argument starts in the original string (after "set-name" + whitespace)
+    let set_name_pos = trimmed.find("set-name")?;
+    let after_keyword = &trimmed[set_name_pos + "set-name".len()..];
+    let rest = after_keyword.trim();
+    if rest.is_empty() {
+        return None;
+    }
+
+    // Strip matching quotes if present
+    if (rest.starts_with('"') && rest.ends_with('"'))
+        || (rest.starts_with('\'') && rest.ends_with('\''))
+    {
+        let inner = &rest[1..rest.len() - 1];
+        if inner.is_empty() {
+            return None;
+        }
+        return Some(inner.to_string());
+    }
+
+    Some(rest.to_string())
+}
+
 /// Extract a human-readable label for a tool invocation
 fn extract_tool_label(hook: &Value) -> Option<String> {
     let tool_name = hook.get("tool_name")?.as_str()?;
@@ -276,6 +295,20 @@ fn extract_tool_label(hook: &Value) -> Option<String> {
             .get("description")
             .and_then(|v| v.as_str())
             .map(|s| super::truncate(s, 60).to_string()),
+        "NotebookEdit" => input
+            .get("notebook_path")
+            .and_then(|v| v.as_str())
+            .map(super::short_path),
+        "Skill" => input
+            .get("skill")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        "AskUserQuestion" => Some("AskUserQuestion".to_string()),
+        "EnterPlanMode" => Some("EnterPlanMode".to_string()),
+        name if name.starts_with("mcp__") => {
+            let stripped = name.strip_prefix("mcp__").unwrap();
+            Some(stripped.rsplit("__").next().unwrap_or(stripped).to_string())
+        }
         _ => None,
     }
 }
@@ -457,5 +490,119 @@ mod tests {
         });
         let label = extract_tool_label(&hook);
         assert_eq!(label, Some("main.rs".to_string()));
+    }
+
+    #[test]
+    fn tool_label_notebook_edit() {
+        let hook = serde_json::json!({
+            "tool_name": "NotebookEdit",
+            "tool_input": { "notebook_path": "/home/user/project/analysis.ipynb" }
+        });
+        assert_eq!(extract_tool_label(&hook), Some("analysis.ipynb".to_string()));
+    }
+
+    #[test]
+    fn tool_label_skill() {
+        let hook = serde_json::json!({
+            "tool_name": "Skill",
+            "tool_input": { "skill": "commit" }
+        });
+        assert_eq!(extract_tool_label(&hook), Some("commit".to_string()));
+    }
+
+    #[test]
+    fn tool_label_ask_user_question() {
+        let hook = serde_json::json!({
+            "tool_name": "AskUserQuestion",
+            "tool_input": { "questions": [] }
+        });
+        assert_eq!(extract_tool_label(&hook), Some("AskUserQuestion".to_string()));
+    }
+
+    #[test]
+    fn tool_label_enter_plan_mode() {
+        let hook = serde_json::json!({
+            "tool_name": "EnterPlanMode",
+            "tool_input": {}
+        });
+        assert_eq!(extract_tool_label(&hook), Some("EnterPlanMode".to_string()));
+    }
+
+    #[test]
+    fn tool_label_mcp_tool() {
+        let hook = serde_json::json!({
+            "tool_name": "mcp__memory__memory_search",
+            "tool_input": { "query": "test" }
+        });
+        assert_eq!(extract_tool_label(&hook), Some("memory_search".to_string()));
+    }
+
+    // --- parse_set_name_command tests ---
+
+    #[test]
+    fn parse_set_name_double_quotes() {
+        let input = serde_json::json!({ "command": "aura set-name \"fix login bug\"" });
+        assert_eq!(
+            parse_set_name_command(&input),
+            Some("fix login bug".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_set_name_single_quotes() {
+        let input = serde_json::json!({ "command": "aura set-name 'fix login bug'" });
+        assert_eq!(
+            parse_set_name_command(&input),
+            Some("fix login bug".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_set_name_no_quotes() {
+        let input = serde_json::json!({ "command": "aura set-name fix-login-bug" });
+        assert_eq!(
+            parse_set_name_command(&input),
+            Some("fix-login-bug".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_set_name_extra_whitespace() {
+        let input = serde_json::json!({ "command": "aura  set-name  \"fix login bug\"" });
+        assert_eq!(
+            parse_set_name_command(&input),
+            Some("fix login bug".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_set_name_not_matching() {
+        let input = serde_json::json!({ "command": "echo hello" });
+        assert_eq!(parse_set_name_command(&input), None);
+    }
+
+    #[test]
+    fn convert_pre_tool_use_with_set_name() {
+        let hook = serde_json::json!({
+            "session_id": "abc123",
+            "cwd": "/home/user/project",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_02",
+            "tool_input": {
+                "command": "aura set-name \"test session\"",
+                "description": "Set session name"
+            }
+        });
+        let msgs = convert_claude_code(&hook).unwrap();
+        assert_eq!(msgs.len(), 2, "expected ToolStarted + SessionNameUpdated");
+
+        let first = serde_json::to_string(&msgs[0]).unwrap();
+        assert!(first.contains("tool_started"));
+
+        let second = serde_json::to_string(&msgs[1]).unwrap();
+        assert!(second.contains("session_name_updated"));
+        assert!(second.contains("test session"));
+        assert!(second.contains("abc123"));
     }
 }

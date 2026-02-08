@@ -10,11 +10,8 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing_subscriber::{fmt, EnvFilter};
-
-/// Stale detection interval
-const STALE_CHECK_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Stale timeout - mark session stale after 10min of no activity
 const STALE_TIMEOUT: Duration = Duration::from_secs(600);
@@ -43,8 +40,6 @@ enum Command {
         #[arg(long, value_enum)]
         agent: HookAgent,
     },
-    /// Print Claude Code hooks config JSON for integration setup
-    HookInstall,
 }
 
 fn init_tracing(verbose: u8) {
@@ -72,10 +67,6 @@ fn main() {
             aura::agents::claude_code::run(agent);
             return;
         }
-        Some(Command::HookInstall) => {
-            aura::agents::claude_code::print_install_config();
-            return;
-        }
         None => {}
     }
 
@@ -92,13 +83,27 @@ fn main() {
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
         rt.block_on(async move {
-            // Spawn stale detection task
+            // Spawn stale detection task — sleeps until the next session is due
+            // to go stale instead of polling at a fixed interval.
             let stale_registry = Arc::clone(&bg_registry);
             let stale_dirty = Arc::clone(&bg_dirty);
             tokio::spawn(async move {
-                let mut interval = tokio::time::interval(STALE_CHECK_INTERVAL);
                 loop {
-                    interval.tick().await;
+                    let sleep_duration = {
+                        if let Ok(reg) = stale_registry.lock() {
+                            reg.next_stale_at(STALE_TIMEOUT)
+                                .map(|t| {
+                                    t.saturating_duration_since(Instant::now())
+                                        + Duration::from_millis(100)
+                                })
+                                .unwrap_or(Duration::from_secs(30))
+                        } else {
+                            Duration::from_secs(5)
+                        }
+                    };
+
+                    tokio::time::sleep(sleep_duration).await;
+
                     if let Ok(mut reg) = stale_registry.lock() {
                         reg.mark_stale(STALE_TIMEOUT);
                         stale_dirty.store(true, Ordering::Relaxed);
@@ -122,4 +127,47 @@ fn main() {
 
     // Run gpui on main thread (blocks)
     ui::run_hud(registry, registry_dirty);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn cli_no_subcommand() {
+        let cli = Cli::try_parse_from(["aura"]).unwrap();
+        assert!(cli.command.is_none());
+        assert_eq!(cli.verbose, 0);
+    }
+
+    #[test]
+    fn cli_verbose_one() {
+        let cli = Cli::try_parse_from(["aura", "-v"]).unwrap();
+        assert_eq!(cli.verbose, 1);
+    }
+
+    #[test]
+    fn cli_verbose_three() {
+        let cli = Cli::try_parse_from(["aura", "-vvv"]).unwrap();
+        assert_eq!(cli.verbose, 3);
+    }
+
+    #[test]
+    fn cli_set_name() {
+        let cli = Cli::try_parse_from(["aura", "set-name", "fix bug"]).unwrap();
+        match cli.command {
+            Some(Command::SetName { name }) => assert_eq!(name, "fix bug"),
+            _ => panic!("expected SetName command"),
+        }
+    }
+
+    #[test]
+    fn cli_hook_claude_code() {
+        let cli = Cli::try_parse_from(["aura", "hook", "--agent", "claude-code"]).unwrap();
+        match cli.command {
+            Some(Command::Hook { agent }) => assert_eq!(agent, HookAgent::ClaudeCode),
+            _ => panic!("expected Hook command"),
+        }
+    }
 }
