@@ -43,7 +43,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 
 // Define application actions
@@ -123,6 +123,28 @@ impl SharedHudState {
     }
 }
 
+/// Debounce window for disambiguating single vs multi-click (ms).
+pub(crate) const CLICK_DEBOUNCE_MS: u64 = 300;
+
+/// Determine the click action based on click count.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ClickAction {
+    /// Toggle session list (delayed by debounce window)
+    ToggleSessionList,
+    /// Cycle to next theme (immediate)
+    CycleTheme,
+    /// No action (e.g. double-click)
+    None,
+}
+
+pub(crate) fn classify_click(click_count: usize) -> ClickAction {
+    match click_count {
+        1 => ClickAction::ToggleSessionList,
+        3 => ClickAction::CycleTheme,
+        _ => ClickAction::None,
+    }
+}
+
 /// Indicator window view (36x36px, always visible)
 struct IndicatorView {
     state: Entity<SharedHudState>,
@@ -130,6 +152,8 @@ struct IndicatorView {
     is_hovered: bool,
     /// Track window position at mouse down (for drag detection)
     window_pos_at_mouse_down: Option<Point<Pixels>>,
+    /// Debounce task for single-click (cancelled on multi-click)
+    pending_click: Option<gpui::Task<()>>,
 }
 
 impl Render for IndicatorView {
@@ -192,72 +216,78 @@ impl Render for IndicatorView {
                         }
                     }
 
-                    match event.click_count() {
-                        3 => {
-                            // Triple-click: cycle theme
+                    // Cancel any pending single-click task on every click
+                    this.pending_click = None;
+
+                    match classify_click(event.click_count()) {
+                        ClickAction::CycleTheme => {
+                            // Triple-click: cycle theme immediately
                             state_for_click.update(app, |state, _cx| {
                                 state.theme_style = state.theme_style.next();
                                 save_theme(state.theme_style);
                             });
                         }
-                        1 => {
-                            // Single-click: toggle session list
-                            // Note: gpui fires on_click for each click in a multi-click
-                            // sequence (count=1, then count=2, then count=3). This means
-                            // a triple-click also triggers single-click. Acceptable for
-                            // a HUD — toggle + cycle is the net result.
-                            state_for_click.update(app, |state, _cx| {
-                                state.registry_dirty.store(true, Ordering::Relaxed);
-                            });
-                            let hud_state = state_for_click.read(app);
-                            let was_visible = hud_state.session_list_visible;
-                            let window_handle = hud_state.session_list_window;
-
-                            let should_open = !was_visible;
-                            let should_close = was_visible && window_handle.is_some();
-
-                            // NOTE: When the session list window is moved and then closed, gpui logs
-                            // "window not found" errors. This is a known gpui limitation (v0.2.2):
-                            // - When a window is moved, gpui registers internal callbacks for position tracking
-                            // - When remove_window() is called, these callbacks still fire
-                            // - The callbacks fail to find the window → "window not found" is logged
-                            // - Error locations in gpui: app.rs:1388, app.rs:2201, window.rs:4725
-                            // - This is benign: the window closes correctly, no functional impact
-                            // - Fix requires changes to gpui's callback cleanup logic
-                            if should_close {
-                                let handle = window_handle.unwrap();
-                                let _ = handle.update(app, |_view, window, _cx| {
-                                    window.remove_window();
-                                });
-
-                                state_for_click.update(app, |state, _cx| {
-                                    state.session_list_visible = false;
-                                    state.session_list_window = None;
-                                });
-                            } else if should_open {
-                                let indicator_origin = window.bounds().origin;
-                                let session_list_origin = point(
-                                    indicator_origin.x - px((EXPANDED_WIDTH - COLLAPSED_WIDTH) / 2.0),
-                                    indicator_origin.y + px(COLLAPSED_HEIGHT + WINDOW_GAP),
-                                );
-                                let session_count = hud_state.sessions.len().clamp(1, MAX_SESSIONS);
-                                let height = calculate_expanded_height(session_count);
-
-                                state_for_click.update(app, |state, _cx| {
-                                    state.session_list_visible = true;
-                                    state.session_list_origin = session_list_origin;
-                                });
-                                if window_handle.is_none() {
-                                    open_session_list_window_sync(app, state_for_click.clone());
-                                } else if let Some(handle) = window_handle {
-                                    let _ = handle.update(app, |_view, window, _cx| {
-                                        window.resize(size(px(EXPANDED_WIDTH), px(height)));
+                        ClickAction::ToggleSessionList => {
+                            // Single-click: debounce — wait before toggling in case
+                            // a double/triple-click follows
+                            let state_for_spawn = state_for_click.clone();
+                            this.pending_click = Some(app.spawn_in(window, async move |this, async_cx| {
+                                async_cx.background_executor().timer(Duration::from_millis(CLICK_DEBOUNCE_MS)).await;
+                                let _ = this.update_in(async_cx, |_this, window, cx| {
+                                    state_for_spawn.update(cx, |state, _cx| {
+                                        state.registry_dirty.store(true, Ordering::Relaxed);
                                     });
-                                }
-                            }
+                                    let hud_state = state_for_spawn.read(cx);
+                                    let was_visible = hud_state.session_list_visible;
+                                    let window_handle = hud_state.session_list_window;
+
+                                    let should_open = !was_visible;
+                                    let should_close = was_visible && window_handle.is_some();
+
+                                    // NOTE: When the session list window is moved and then closed, gpui logs
+                                    // "window not found" errors. This is a known gpui limitation (v0.2.2):
+                                    // - When a window is moved, gpui registers internal callbacks for position tracking
+                                    // - When remove_window() is called, these callbacks still fire
+                                    // - The callbacks fail to find the window -> "window not found" is logged
+                                    // - Error locations in gpui: app.rs:1388, app.rs:2201, window.rs:4725
+                                    // - This is benign: the window closes correctly, no functional impact
+                                    // - Fix requires changes to gpui's callback cleanup logic
+                                    if should_close {
+                                        let handle = window_handle.unwrap();
+                                        let _ = handle.update(cx, |_view, window, _cx| {
+                                            window.remove_window();
+                                        });
+
+                                        state_for_spawn.update(cx, |state, _cx| {
+                                            state.session_list_visible = false;
+                                            state.session_list_window = None;
+                                        });
+                                    } else if should_open {
+                                        let indicator_origin = window.bounds().origin;
+                                        let session_list_origin = point(
+                                            indicator_origin.x - px((EXPANDED_WIDTH - COLLAPSED_WIDTH) / 2.0),
+                                            indicator_origin.y + px(COLLAPSED_HEIGHT + WINDOW_GAP),
+                                        );
+                                        let session_count = hud_state.sessions.len().clamp(1, MAX_SESSIONS);
+                                        let height = calculate_expanded_height(session_count);
+
+                                        state_for_spawn.update(cx, |state, _cx| {
+                                            state.session_list_visible = true;
+                                            state.session_list_origin = session_list_origin;
+                                        });
+                                        if window_handle.is_none() {
+                                            open_session_list_window_sync(cx, state_for_spawn.clone());
+                                        } else if let Some(handle) = window_handle {
+                                            let _ = handle.update(cx, |_view, window, _cx| {
+                                                window.resize(size(px(EXPANDED_WIDTH), px(height)));
+                                            });
+                                        }
+                                    }
+                                });
+                            }));
                         }
-                        _ => {
-                            // Double-click or other: ignore
+                        ClickAction::None => {
+                            // Double-click or other: no action
                         }
                     }
                 })
@@ -917,6 +947,7 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<Atomic
                         state: state_for_indicator,
                         is_hovered: false,
                         window_pos_at_mouse_down: None,
+                        pending_click: None,
                     })
                 },
             )
@@ -1157,6 +1188,7 @@ mod tests {
             state: state.clone(),
             is_hovered: false,
             window_pos_at_mouse_down: None,
+            pending_click: None,
         });
 
         let view = window.root(cx).unwrap();
@@ -1266,5 +1298,29 @@ mod tests {
             // System + dark → liquid dark → uses shadow
             assert!(colors.use_shadow);
         });
+    }
+
+    // --- 2.10: Click classification ---
+
+    #[test]
+    fn classify_click_single_toggles_session_list() {
+        assert_eq!(classify_click(1), ClickAction::ToggleSessionList);
+    }
+
+    #[test]
+    fn classify_click_double_is_none() {
+        assert_eq!(classify_click(2), ClickAction::None);
+    }
+
+    #[test]
+    fn classify_click_triple_cycles_theme() {
+        assert_eq!(classify_click(3), ClickAction::CycleTheme);
+    }
+
+    #[test]
+    fn classify_click_higher_counts_are_none() {
+        assert_eq!(classify_click(4), ClickAction::None);
+        assert_eq!(classify_click(5), ClickAction::None);
+        assert_eq!(classify_click(10), ClickAction::None);
     }
 }
