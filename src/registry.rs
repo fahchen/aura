@@ -322,12 +322,19 @@ impl SessionRegistry {
         self.process_event_from(event, AgentType::ClaudeCode);
     }
 
-    /// Returns the earliest `Instant` at which a non-stale session will become
-    /// stale, or `None` if no sessions are candidates for going stale.
+    /// Returns the earliest `Instant` at which a session will become stale,
+    /// or `None` if no sessions are candidates for going stale.
+    ///
+    /// Only considers sessions that `mark_stale()` would actually transition
+    /// (i.e. not already `Idle`, `Waiting`, or `Stale`).
     pub fn next_stale_at(&self, timeout: Duration) -> Option<Instant> {
         self.sessions
             .values()
-            .filter(|s| s.state != SessionState::Stale)
+            .filter(|s| {
+                s.state != SessionState::Stale
+                    && s.state != SessionState::Idle
+                    && s.state != SessionState::Waiting
+            })
             .map(|s| s.last_activity + timeout)
             .min()
     }
@@ -811,6 +818,20 @@ mod tests {
         {
             let session = registry.sessions.get_mut("s1").unwrap();
             session.state = SessionState::Stale;
+        }
+        assert!(registry.next_stale_at(Duration::from_secs(600)).is_none());
+
+        // Idle sessions should also be excluded (won't transition to Stale)
+        {
+            let session = registry.sessions.get_mut("s1").unwrap();
+            session.state = SessionState::Idle;
+        }
+        assert!(registry.next_stale_at(Duration::from_secs(600)).is_none());
+
+        // Waiting sessions should also be excluded
+        {
+            let session = registry.sessions.get_mut("s1").unwrap();
+            session.state = SessionState::Waiting;
         }
         assert!(registry.next_stale_at(Duration::from_secs(600)).is_none());
     }

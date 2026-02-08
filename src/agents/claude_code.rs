@@ -229,9 +229,12 @@ fn parse_set_name_command(tool_input: &Value) -> Option<String> {
     let trimmed = command.trim();
 
     // Use split_whitespace to skip arbitrary interior whitespace, then verify
-    // the first two tokens are "aura" and "set-name".
+    // the first two tokens are "<something>/aura" (or just "aura") and "set-name".
+    // Accepts: "aura", "./aura", "/usr/local/bin/aura", "../aura", etc.
     let mut tokens = trimmed.split_whitespace();
-    if tokens.next() != Some("aura") {
+    let binary = tokens.next()?;
+    let basename = binary.rsplit('/').next().unwrap_or(binary);
+    if basename != "aura" {
         return None;
     }
     if tokens.next() != Some("set-name") {
@@ -579,6 +582,24 @@ mod tests {
     fn parse_set_name_not_matching() {
         let input = serde_json::json!({ "command": "echo hello" });
         assert_eq!(parse_set_name_command(&input), None);
+    }
+
+    #[test]
+    fn parse_set_name_relative_path() {
+        let input = serde_json::json!({ "command": "./aura set-name \"fix bug\"" });
+        assert_eq!(
+            parse_set_name_command(&input),
+            Some("fix bug".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_set_name_absolute_path() {
+        let input = serde_json::json!({ "command": "/usr/local/bin/aura set-name \"fix bug\"" });
+        assert_eq!(
+            parse_set_name_command(&input),
+            Some("fix bug".to_string())
+        );
     }
 
     #[test]

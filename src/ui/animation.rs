@@ -222,9 +222,9 @@ mod tests {
         let offset = calculate_shake_offset(start);
         assert!(offset.abs() < 0.5, "Initial offset should be near 0");
 
-        // Offset should always be within amplitude bounds
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        let offset = calculate_shake_offset(start);
+        // Simulate 50ms elapsed — offset should be within amplitude bounds
+        let past = Instant::now() - std::time::Duration::from_millis(50);
+        let offset = calculate_shake_offset(past);
         assert!(
             offset.abs() <= SHAKE_AMPLITUDE + 0.1,
             "Offset should be within amplitude bounds"
@@ -242,9 +242,9 @@ mod tests {
             opacity
         );
 
-        // After some time, opacity should always be within bounds [0.3, 0.5]
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        let opacity = calculate_breathe_opacity(start);
+        // Simulate 100ms elapsed — opacity should be within bounds [0.3, 0.5]
+        let past = Instant::now() - std::time::Duration::from_millis(100);
+        let opacity = calculate_breathe_opacity(past);
         assert!(
             (BREATHE_MIN_OPACITY - 0.01..=BREATHE_MAX_OPACITY + 0.01).contains(&opacity),
             "Opacity should be in range [0.3, 0.5], got {}",

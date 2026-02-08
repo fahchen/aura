@@ -496,6 +496,7 @@ dependencies = [
  "gpui",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

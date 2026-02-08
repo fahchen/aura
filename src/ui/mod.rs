@@ -202,6 +202,10 @@ impl Render for IndicatorView {
                         }
                         1 => {
                             // Single-click: toggle session list
+                            // Note: gpui fires on_click for each click in a multi-click
+                            // sequence (count=1, then count=2, then count=3). This means
+                            // a triple-click also triggers single-click. Acceptable for
+                            // a HUD — toggle + cycle is the net result.
                             state_for_click.update(app, |state, _cx| {
                                 state.registry_dirty.store(true, Ordering::Relaxed);
                             });
@@ -793,13 +797,25 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<Atomic
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0);
 
-        // Load saved indicator position (if any)
+        // Load saved indicator position, clamped to visible display bounds
         let saved_state = crate::config::load_state();
+        let default_x = (screen_width - px(EXPANDED_WIDTH)) / 2.0 + px((EXPANDED_WIDTH - COLLAPSED_WIDTH) / 2.0);
+        let default_y = px(30.0);
         let (indicator_x, indicator_y) = if let (Some(x), Some(y)) = (saved_state.indicator_x, saved_state.indicator_y) {
-            (px(x as f32), px(y as f32))
+            let x = px(x as f32);
+            let y = px(y as f32);
+            let db = display_bounds;
+            // Clamp so the indicator stays fully on-screen
+            let min_x = db.origin.x;
+            let max_x = db.origin.x + db.size.width - px(COLLAPSED_WIDTH);
+            let min_y = db.origin.y;
+            let max_y = db.origin.y + db.size.height - px(COLLAPSED_HEIGHT);
+            if x >= min_x && x <= max_x && y >= min_y && y <= max_y {
+                (x, y)
+            } else {
+                (default_x, default_y)
+            }
         } else {
-            let default_x = (screen_width - px(EXPANDED_WIDTH)) / 2.0 + px((EXPANDED_WIDTH - COLLAPSED_WIDTH) / 2.0);
-            let default_y = px(30.0);
             (default_x, default_y)
         };
 

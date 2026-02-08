@@ -127,7 +127,7 @@ fn save_config_to(config: &Config, path: &Path) -> Result<(), std::io::Error> {
     }
     let json = serde_json::to_string_pretty(config)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    std::fs::write(path, json)
+    atomic_write(path, json.as_bytes())
 }
 
 fn load_state_from(path: &Path) -> State {
@@ -143,7 +143,21 @@ fn save_state_to(state: &State, path: &Path) -> Result<(), std::io::Error> {
     }
     let json = serde_json::to_string_pretty(state)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    std::fs::write(path, json)
+    atomic_write(path, json.as_bytes())
+}
+
+/// Write bytes to a file atomically: write to a temp file in the same
+/// directory, then rename over the target. Prevents partial JSON on crash.
+fn atomic_write(path: &Path, data: &[u8]) -> Result<(), std::io::Error> {
+    use std::io::Write;
+
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no parent")
+    })?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    tmp.write_all(data)?;
+    tmp.persist(path).map_err(|e| e.error)?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
