@@ -55,7 +55,7 @@ const WINDOW_GAP: f32 = 4.0;
 
 
 /// Shared HUD state between indicator and session list windows
-struct SharedHudState {
+pub(crate) struct SharedHudState {
     /// Current sessions to display (refreshed from registry)
     sessions: Vec<SessionInfo>,
     /// Animation start time for time-based tool cycling
@@ -78,6 +78,28 @@ struct SharedHudState {
     system_is_dark: bool,
     /// Whether registry data changed and needs refresh
     registry_dirty: Arc<AtomicBool>,
+}
+
+#[cfg(test)]
+impl SharedHudState {
+    /// Create a SharedHudState for testing with given sessions
+    pub(crate) fn new_for_test(sessions: Vec<SessionInfo>) -> Self {
+        let registry = Arc::new(Mutex::new(SessionRegistry::new()));
+        let registry_dirty = Arc::new(AtomicBool::new(false));
+        Self {
+            sessions,
+            animation_start: Instant::now(),
+            animation_seed: 42,
+            registry,
+            session_list_visible: false,
+            session_list_window: None,
+            session_list_origin: point(px(0.0), px(0.0)),
+            indicator_window: None,
+            theme_style: theme::ThemeStyle::System,
+            system_is_dark: true,
+            registry_dirty,
+        }
+    }
 }
 
 impl SharedHudState {
@@ -159,7 +181,13 @@ impl Render for IndicatorView {
                         let dx = current_pos.x - start_pos.x;
                         let dy = current_pos.y - start_pos.y;
                         if dx > threshold || dx < -threshold || dy > threshold || dy < -threshold {
-                            // Window was dragged, don't toggle
+                            // Window was dragged — save new position
+                            let pos = current_pos;
+                            let state = crate::config::State {
+                                indicator_x: Some(f32::from(pos.x) as f64),
+                                indicator_y: Some(f32::from(pos.y) as f64),
+                            };
+                            let _ = crate::config::save_state(&state);
                             return;
                         }
                     }
@@ -169,6 +197,7 @@ impl Render for IndicatorView {
                             // Triple-click: cycle theme
                             state_for_click.update(app, |state, _cx| {
                                 state.theme_style = state.theme_style.next();
+                                save_theme(state.theme_style);
                             });
                         }
                         1 => {
@@ -694,12 +723,23 @@ fn open_session_list_window_sync(app: &mut App, state: Entity<SharedHudState>) {
     }
 }
 
+/// Persist the current theme preference to config.json.
+fn save_theme(style: theme::ThemeStyle) {
+    let mut config = crate::config::load_config();
+    config.theme = style.to_config_str().to_string();
+    let _ = crate::config::save_config(&config);
+}
+
 /// Run the HUD application with two separate windows
 ///
 /// This function blocks and runs the gpui event loop.
 /// Call from main thread only.
 pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<AtomicBool>) {
     Application::new().with_assets(Assets).run(|app: &mut App| {
+        // Load saved theme preference from config.json
+        let saved_config = crate::config::load_config();
+        let initial_theme = theme::ThemeStyle::from_config_str(&saved_config.theme);
+
         // Register embedded Maple Mono font for consistent marquee rendering
         let font_data = include_bytes!("../../assets/fonts/MapleMono-NF-CN-Regular.ttf");
         app.text_system()
@@ -753,12 +793,21 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<Atomic
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0);
 
-        // Position windows centered under notch
-        let window_x = (screen_width - px(EXPANDED_WIDTH)) / 2.0;
-        let window_y = px(30.0); // Just below menu bar
+        // Load saved indicator position (if any)
+        let saved_state = crate::config::load_state();
+        let (indicator_x, indicator_y) = if let (Some(x), Some(y)) = (saved_state.indicator_x, saved_state.indicator_y) {
+            (px(x as f32), px(y as f32))
+        } else {
+            let default_x = (screen_width - px(EXPANDED_WIDTH)) / 2.0 + px((EXPANDED_WIDTH - COLLAPSED_WIDTH) / 2.0);
+            let default_y = px(30.0);
+            (default_x, default_y)
+        };
 
         // Calculate session list origin (below indicator)
-        let session_list_origin = point(window_x, window_y + px(COLLAPSED_HEIGHT + WINDOW_GAP));
+        let session_list_origin = point(
+            indicator_x - px((EXPANDED_WIDTH - COLLAPSED_WIDTH) / 2.0),
+            indicator_y + px(COLLAPSED_HEIGHT + WINDOW_GAP),
+        );
 
         // Detect initial system appearance
         let initial_system_is_dark = app
@@ -781,7 +830,7 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<Atomic
             session_list_window: None,
             session_list_origin,
             indicator_window: None, // Will be set after window creation
-            theme_style: theme::ThemeStyle::System,
+            theme_style: initial_theme,
             system_is_dark: initial_system_is_dark,
             registry_dirty,
         });
@@ -791,6 +840,7 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<Atomic
         app.on_action(move |_: &SetThemeSystem, cx: &mut App| {
             state_for_system.update(cx, |state, _cx| {
                 state.theme_style = theme::ThemeStyle::System;
+                save_theme(state.theme_style);
             });
         });
 
@@ -798,6 +848,7 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<Atomic
         app.on_action(move |_: &SetThemeLiquidDark, cx: &mut App| {
             state_for_liquid_dark.update(cx, |state, _cx| {
                 state.theme_style = theme::ThemeStyle::LiquidDark;
+                save_theme(state.theme_style);
             });
         });
 
@@ -805,6 +856,7 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<Atomic
         app.on_action(move |_: &SetThemeLiquidLight, cx: &mut App| {
             state_for_liquid_light.update(cx, |state, _cx| {
                 state.theme_style = theme::ThemeStyle::LiquidLight;
+                save_theme(state.theme_style);
             });
         });
 
@@ -812,6 +864,7 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<Atomic
         app.on_action(move |_: &SetThemeSolidDark, cx: &mut App| {
             state_for_solid_dark.update(cx, |state, _cx| {
                 state.theme_style = theme::ThemeStyle::SolidDark;
+                save_theme(state.theme_style);
             });
         });
 
@@ -819,12 +872,13 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<Atomic
         app.on_action(move |_: &SetThemeSolidLight, cx: &mut App| {
             state_for_solid_light.update(cx, |state, _cx| {
                 state.theme_style = theme::ThemeStyle::SolidLight;
+                save_theme(state.theme_style);
             });
         });
 
         // Create indicator window (always visible, 36x36)
         let indicator_bounds = Bounds {
-            origin: point(window_x + px((EXPANDED_WIDTH - COLLAPSED_WIDTH) / 2.0), window_y),
+            origin: point(indicator_x, indicator_y),
             size: size(px(COLLAPSED_WIDTH), px(COLLAPSED_HEIGHT)),
         };
 
@@ -863,4 +917,338 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<Atomic
         // Keep shared state alive
         let _ = shared_state;
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    fn make_session(id: &str, state: SessionState) -> SessionInfo {
+        SessionInfo {
+            session_id: id.to_string(),
+            cwd: "/test/project".to_string(),
+            state,
+            running_tools: vec![],
+            name: None,
+            stopped_at: None,
+            stale_at: None,
+            permission_tool: None,
+            recent_activity: vec![],
+        }
+    }
+
+    // --- 2.1: SharedHudState session refresh ---
+
+    #[gpui::test]
+    async fn shared_state_refresh_from_registry(cx: &mut TestAppContext) {
+        let registry = Arc::new(Mutex::new(SessionRegistry::new()));
+        let registry_dirty = Arc::new(AtomicBool::new(false));
+
+        // Seed registry with a session
+        {
+            let mut reg = registry.lock().unwrap();
+            reg.process_event(crate::AgentEvent::SessionStarted {
+                session_id: "s1".into(),
+                agent: crate::AgentType::ClaudeCode,
+                cwd: "/test/project".into(),
+            });
+        }
+
+        let state = cx.new(|_cx| {
+            let mut s = SharedHudState::new_for_test(vec![]);
+            s.registry = registry.clone();
+            s.registry_dirty = registry_dirty.clone();
+            s
+        });
+
+        // Initially empty
+        state.read_with(cx, |s, _| {
+            assert_eq!(s.sessions.len(), 0);
+        });
+
+        // After refresh
+        state.update(cx, |s, _| {
+            s.refresh_from_registry();
+        });
+
+        state.read_with(cx, |s, _| {
+            assert_eq!(s.sessions.len(), 1);
+            assert_eq!(s.sessions[0].session_id, "s1");
+        });
+    }
+
+    #[gpui::test]
+    async fn shared_state_starts_with_list_hidden(cx: &mut TestAppContext) {
+        let state = cx.new(|_cx| SharedHudState::new_for_test(vec![]));
+
+        state.read_with(cx, |s, _| {
+            assert!(!s.session_list_visible);
+            assert!(s.session_list_window.is_none());
+        });
+    }
+
+    // --- 2.2: Theme cycling ---
+
+    #[gpui::test]
+    async fn theme_cycle_system_to_liquid_dark(cx: &mut TestAppContext) {
+        let state = cx.new(|_cx| SharedHudState::new_for_test(vec![]));
+
+        state.read_with(cx, |s, _| {
+            assert_eq!(s.theme_style, theme::ThemeStyle::System);
+        });
+
+        state.update(cx, |s, _| {
+            s.theme_style = s.theme_style.next();
+        });
+
+        state.read_with(cx, |s, _| {
+            assert_eq!(s.theme_style, theme::ThemeStyle::LiquidDark);
+        });
+    }
+
+    #[gpui::test]
+    async fn theme_cycle_full_round(cx: &mut TestAppContext) {
+        let state = cx.new(|_cx| SharedHudState::new_for_test(vec![]));
+
+        let expected = [
+            theme::ThemeStyle::LiquidDark,
+            theme::ThemeStyle::LiquidLight,
+            theme::ThemeStyle::SolidDark,
+            theme::ThemeStyle::SolidLight,
+            theme::ThemeStyle::System, // wraps back
+        ];
+
+        for &exp in &expected {
+            state.update(cx, |s, _| {
+                s.theme_style = s.theme_style.next();
+            });
+            state.read_with(cx, |s, _| {
+                assert_eq!(s.theme_style, exp);
+            });
+        }
+    }
+
+    // --- 2.3: Theme colors resolve correctly ---
+
+    #[gpui::test]
+    async fn theme_colors_dark_system(cx: &mut TestAppContext) {
+        let state = cx.new(|_cx| {
+            let mut s = SharedHudState::new_for_test(vec![]);
+            s.system_is_dark = true;
+            s
+        });
+
+        state.read_with(cx, |s, _| {
+            let colors = s.theme_colors();
+            // Dark system should use shadow (liquid dark)
+            assert!(colors.use_shadow);
+        });
+    }
+
+    #[gpui::test]
+    async fn theme_colors_light_system(cx: &mut TestAppContext) {
+        let state = cx.new(|_cx| {
+            let mut s = SharedHudState::new_for_test(vec![]);
+            s.system_is_dark = false;
+            s
+        });
+
+        state.read_with(cx, |s, _| {
+            let colors = s.theme_colors();
+            // Light system should use shadow (liquid light)
+            assert!(colors.use_shadow);
+        });
+    }
+
+    #[gpui::test]
+    async fn theme_colors_solid_uses_shadow(cx: &mut TestAppContext) {
+        let state = cx.new(|_cx| {
+            let mut s = SharedHudState::new_for_test(vec![]);
+            s.theme_style = theme::ThemeStyle::SolidDark;
+            s
+        });
+
+        state.read_with(cx, |s, _| {
+            let colors = s.theme_colors();
+            // All themes use shadow (implemented in Phase 3.1)
+            assert!(colors.use_shadow);
+        });
+    }
+
+    // --- 2.4: Session list visibility toggle ---
+
+    #[gpui::test]
+    async fn toggle_session_list_visibility(cx: &mut TestAppContext) {
+        let sessions = vec![make_session("s1", SessionState::Running)];
+        let state = cx.new(|_cx| SharedHudState::new_for_test(sessions));
+
+        // Initially hidden
+        state.read_with(cx, |s, _| {
+            assert!(!s.session_list_visible);
+        });
+
+        // Toggle on
+        state.update(cx, |s, _| {
+            s.session_list_visible = true;
+        });
+
+        state.read_with(cx, |s, _| {
+            assert!(s.session_list_visible);
+        });
+
+        // Toggle off
+        state.update(cx, |s, _| {
+            s.session_list_visible = false;
+        });
+
+        state.read_with(cx, |s, _| {
+            assert!(!s.session_list_visible);
+        });
+    }
+
+    // --- 2.5: Registry dirty flag ---
+
+    #[gpui::test]
+    async fn registry_dirty_flag_swap(cx: &mut TestAppContext) {
+        let state = cx.new(|_cx| SharedHudState::new_for_test(vec![]));
+
+        // Set dirty
+        state.read_with(cx, |s, _| {
+            s.registry_dirty.store(true, Ordering::Relaxed);
+        });
+
+        // Swap should return true and clear it
+        state.update(cx, |s, _| {
+            let was_dirty = s.registry_dirty.swap(false, Ordering::Relaxed);
+            assert!(was_dirty);
+        });
+
+        // Should now be clean
+        state.read_with(cx, |s, _| {
+            assert!(!s.registry_dirty.load(Ordering::Relaxed));
+        });
+    }
+
+    // --- 2.6: Indicator view window creation ---
+
+    #[gpui::test]
+    async fn indicator_view_initial_state(cx: &mut TestAppContext) {
+        let sessions = vec![make_session("s1", SessionState::Running)];
+        let state = cx.new(|_cx| SharedHudState::new_for_test(sessions));
+
+        let window = cx.add_window(|_window, _cx| IndicatorView {
+            state: state.clone(),
+            is_hovered: false,
+            window_pos_at_mouse_down: None,
+        });
+
+        let view = window.root(cx).unwrap();
+
+        view.read_with(cx, |v, _| {
+            assert!(!v.is_hovered);
+            assert!(v.window_pos_at_mouse_down.is_none());
+        });
+    }
+
+    // --- 2.7: Session list view creation ---
+
+    #[gpui::test]
+    async fn session_list_view_initial_state(cx: &mut TestAppContext) {
+        let sessions = vec![make_session("s1", SessionState::Running)];
+        let state = cx.new(|_cx| SharedHudState::new_for_test(sessions));
+
+        let window = cx.add_window(|_window, _cx| SessionListView {
+            state: state.clone(),
+            last_session_count: 0,
+            appeared_at: HashMap::new(),
+            icon_hover_at: HashMap::new(),
+            removing: HashMap::new(),
+            session_cache: HashMap::new(),
+        });
+
+        let view = window.root(cx).unwrap();
+
+        view.read_with(cx, |v, _| {
+            assert_eq!(v.last_session_count, 0);
+            assert!(v.appeared_at.is_empty());
+            assert!(v.removing.is_empty());
+        });
+    }
+
+    // --- 2.8: Session removal from registry via state ---
+
+    #[gpui::test]
+    async fn session_removal_from_registry(cx: &mut TestAppContext) {
+        let registry = Arc::new(Mutex::new(SessionRegistry::new()));
+
+        // Add two sessions
+        {
+            let mut reg = registry.lock().unwrap();
+            reg.process_event(crate::AgentEvent::SessionStarted {
+                session_id: "s1".into(),
+                agent: crate::AgentType::ClaudeCode,
+                cwd: "/test/a".into(),
+            });
+            reg.process_event(crate::AgentEvent::SessionStarted {
+                session_id: "s2".into(),
+                agent: crate::AgentType::ClaudeCode,
+                cwd: "/test/b".into(),
+            });
+        }
+
+        let state = cx.new(|_cx| {
+            let mut s = SharedHudState::new_for_test(vec![]);
+            s.registry = registry.clone();
+            s
+        });
+
+        // Refresh to populate
+        state.update(cx, |s, _| {
+            s.refresh_from_registry();
+        });
+
+        state.read_with(cx, |s, _| {
+            assert_eq!(s.sessions.len(), 2);
+        });
+
+        // Remove one session
+        state.update(cx, |s, _| {
+            if let Ok(mut reg) = s.registry.lock() {
+                reg.remove_session("s1");
+            }
+            s.refresh_from_registry();
+        });
+
+        state.read_with(cx, |s, _| {
+            assert_eq!(s.sessions.len(), 1);
+            assert_eq!(s.sessions[0].session_id, "s2");
+        });
+    }
+
+    // --- 2.9: System appearance detection ---
+
+    #[gpui::test]
+    async fn system_appearance_dark_detection(cx: &mut TestAppContext) {
+        let state = cx.new(|_cx| {
+            let mut s = SharedHudState::new_for_test(vec![]);
+            s.system_is_dark = false;
+            s
+        });
+
+        state.read_with(cx, |s, _| {
+            assert!(!s.system_is_dark);
+        });
+
+        state.update(cx, |s, _| {
+            s.system_is_dark = true;
+        });
+
+        state.read_with(cx, |s, _| {
+            assert!(s.system_is_dark);
+            let colors = s.theme_colors();
+            // System + dark → liquid dark → uses shadow
+            assert!(colors.use_shadow);
+        });
+    }
 }
