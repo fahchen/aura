@@ -58,11 +58,11 @@ Feature: HUD Indicator
 
   Rule: Click actions are disambiguated by debounce
 
-    Scenario: Single-click is delayed to allow multi-click detection
+    Scenario: Single-click is delayed by the OS double-click interval
       Given the session list is collapsed
       When the user clicks the indicator once
-      Then the single-click action is delayed by a short debounce window
-      And the session list expands after the debounce window elapses
+      Then the single-click action is delayed by the system double-click interval
+      And the session list expands after the interval elapses
 
     Scenario: Triple-click cycles theme without toggling session list
       Given the current theme is "Liquid Dark"

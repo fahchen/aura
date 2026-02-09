@@ -123,8 +123,27 @@ impl SharedHudState {
     }
 }
 
-/// Debounce window for disambiguating single vs multi-click (ms).
-pub(crate) const CLICK_DEBOUNCE_MS: u64 = 300;
+/// Fallback debounce when the OS double-click interval cannot be read (ms).
+const CLICK_DEBOUNCE_FALLBACK_MS: u64 = 500;
+
+/// Read the macOS system double-click interval.
+/// Falls back to 500 ms if the FFI call fails or returns an unreasonable value.
+pub(crate) fn system_double_click_interval() -> Duration {
+    #[cfg(target_os = "macos")]
+    {
+        use objc::runtime::{Class, Sel};
+
+        let cls = Class::get("NSEvent");
+        let sel = Sel::register("doubleClickInterval");
+        if let Some(cls) = cls {
+            let interval: f64 = unsafe { objc::Message::send_message(cls, sel, ()).unwrap() };
+            if interval > 0.0 && interval < 5.0 {
+                return Duration::from_secs_f64(interval);
+            }
+        }
+    }
+    Duration::from_millis(CLICK_DEBOUNCE_FALLBACK_MS)
+}
 
 /// Determine the click action based on click count.
 #[derive(Debug, Clone, PartialEq)]
@@ -232,7 +251,7 @@ impl Render for IndicatorView {
                             // a double/triple-click follows
                             let state_for_spawn = state_for_click.clone();
                             this.pending_click = Some(app.spawn_in(window, async move |this, async_cx| {
-                                async_cx.background_executor().timer(Duration::from_millis(CLICK_DEBOUNCE_MS)).await;
+                                async_cx.background_executor().timer(system_double_click_interval()).await;
                                 let _ = this.update_in(async_cx, |_this, window, cx| {
                                     state_for_spawn.update(cx, |state, _cx| {
                                         state.registry_dirty.store(true, Ordering::Relaxed);
