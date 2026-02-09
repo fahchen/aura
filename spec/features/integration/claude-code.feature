@@ -54,6 +54,55 @@ Feature: Claude Code Integration
       When a "UserPromptSubmit" hook fires
       Then session state is "Running"
 
+    Scenario: PermissionRequest triggers Attention
+      When a "PermissionRequest" hook fires with tool_name "Write"
+      Then session state is "Attention"
+      And the permission tool is "Write"
+
+  Rule: Multiple hooks normalize to the same event
+
+    # Attention: both Notification(permission_prompt) and PermissionRequest
+    # produce NeedsAttention with tool_name as the message.
+
+    Scenario: Notification(permission_prompt) and PermissionRequest produce identical events
+      When a "Notification" hook fires with notification_type "permission_prompt" and tool_name "Bash"
+      And a "PermissionRequest" hook fires with tool_name "Bash"
+      Then both produce NeedsAttention with message "Bash"
+
+    # Tool completion: PostToolUse and PostToolUseFailure both produce ToolCompleted
+    # with the same tool_id regardless of success/failure.
+
+    Scenario: PostToolUse and PostToolUseFailure both produce ToolCompleted
+      Given session "abc" has a running tool with id "t1"
+      When a "PostToolUse" hook fires with tool_use_id "t1"
+      Then the event is ToolCompleted with tool_id "t1"
+      When a "PostToolUseFailure" hook fires with tool_use_id "t2"
+      Then the event is ToolCompleted with tool_id "t2"
+
+    # Activity: UserPromptSubmit, SubagentStart, and SubagentStop all
+    # produce the same Activity event.
+
+    Scenario Outline: Activity-producing hooks all emit the same event
+      When a "<hook>" hook fires for session "abc"
+      Then the event is Activity for session "abc"
+
+      Examples:
+        | hook              |
+        | UserPromptSubmit  |
+        | SubagentStart     |
+        | SubagentStop      |
+
+    # Notification catch-all: unknown notification types produce NeedsAttention
+    # with the message field (not tool_name).
+
+    Scenario: Unknown notification types produce NeedsAttention with message
+      When a "Notification" hook fires with notification_type "auth_success" and message "Authenticated"
+      Then the event is NeedsAttention with message "Authenticated"
+
+    Scenario: Notification with elicitation_dialog produces NeedsAttention
+      When a "Notification" hook fires with notification_type "elicitation_dialog" and message "Choose an option"
+      Then the event is NeedsAttention with message "Choose an option"
+
   Rule: Hook events are received via Unix socket
 
     Scenario: Hook CLI forwards events to daemon
@@ -103,12 +152,14 @@ Feature: Claude Code Integration
         | EnterPlanMode    | (none)      | (none)                             | (tool name fallback)   |
         | Skill            | skill       | commit                             | commit                 |
 
-  Rule: Subagent events are ignored
+  Rule: Subagent events signal activity
 
-    Scenario: SubagentStart is not forwarded
-      When a "SubagentStart" hook fires
-      Then no AgentEvent is emitted
+    Scenario: SubagentStart signals activity
+      Given session "abc" exists
+      When a "SubagentStart" hook fires with agent_type "Explore"
+      Then session "abc" state is "Running"
 
-    Scenario: SubagentStop is not forwarded
-      When a "SubagentStop" hook fires
-      Then no AgentEvent is emitted
+    Scenario: SubagentStop signals activity
+      Given session "abc" exists
+      When a "SubagentStop" hook fires with agent_type "Explore"
+      Then session "abc" state is "Running"

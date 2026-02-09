@@ -212,7 +212,9 @@ fn convert_claude_code(hook: &Value) -> Option<Vec<AgentEvent>> {
             vec![AgentEvent::Activity { session_id, cwd }]
         }
 
-        "SubagentStart" | "SubagentStop" => return None,
+        "SubagentStart" | "SubagentStop" => {
+            vec![AgentEvent::Activity { session_id, cwd }]
+        }
 
         _ => return None,
     };
@@ -466,13 +468,155 @@ mod tests {
     }
 
     #[test]
-    fn subagent_events_ignored() {
+    fn subagent_start_emits_activity() {
         let hook = serde_json::json!({
             "session_id": "abc123",
             "cwd": "/home/user/project",
-            "hook_event_name": "SubagentStart"
+            "hook_event_name": "SubagentStart",
+            "agent_type": "Explore"
         });
-        assert!(convert_claude_code(&hook).is_none());
+        let msgs = convert_claude_code(&hook).unwrap();
+        assert_eq!(msgs.len(), 1);
+        let json = serde_json::to_string(&msgs[0]).unwrap();
+        assert!(json.contains("\"type\":\"activity\""));
+    }
+
+    #[test]
+    fn subagent_stop_emits_activity() {
+        let hook = serde_json::json!({
+            "session_id": "abc123",
+            "cwd": "/home/user/project",
+            "hook_event_name": "SubagentStop",
+            "agent_type": "Explore"
+        });
+        let msgs = convert_claude_code(&hook).unwrap();
+        assert_eq!(msgs.len(), 1);
+        let json = serde_json::to_string(&msgs[0]).unwrap();
+        assert!(json.contains("\"type\":\"activity\""));
+    }
+
+    // --- Event normalization tests ---
+
+    #[test]
+    fn post_tool_use_failure_normalizes_to_tool_completed() {
+        let hook = serde_json::json!({
+            "session_id": "abc123",
+            "cwd": "/home/user/project",
+            "hook_event_name": "PostToolUseFailure",
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_fail",
+            "error": "Command exited with non-zero status code 1"
+        });
+        let msgs = convert_claude_code(&hook).unwrap();
+        assert_eq!(msgs.len(), 1);
+        let json = serde_json::to_string(&msgs[0]).unwrap();
+        assert!(json.contains("tool_completed"));
+        assert!(json.contains("toolu_fail"));
+    }
+
+    #[test]
+    fn notification_and_permission_request_produce_same_event() {
+        let notification = serde_json::json!({
+            "session_id": "abc123",
+            "cwd": "/home/user/project",
+            "hook_event_name": "Notification",
+            "notification_type": "permission_prompt",
+            "tool_name": "Bash",
+            "message": "Allow Bash command?"
+        });
+        let permission = serde_json::json!({
+            "session_id": "abc123",
+            "cwd": "/home/user/project",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Bash"
+        });
+
+        let n_msgs = convert_claude_code(&notification).unwrap();
+        let p_msgs = convert_claude_code(&permission).unwrap();
+
+        // Both produce exactly one NeedsAttention event
+        assert_eq!(n_msgs.len(), 1);
+        assert_eq!(p_msgs.len(), 1);
+
+        let n_json = serde_json::to_string(&n_msgs[0]).unwrap();
+        let p_json = serde_json::to_string(&p_msgs[0]).unwrap();
+
+        // Both are needs_attention with message "Bash"
+        assert!(n_json.contains("needs_attention"));
+        assert!(p_json.contains("needs_attention"));
+        assert!(n_json.contains("\"message\":\"Bash\""));
+        assert!(p_json.contains("\"message\":\"Bash\""));
+    }
+
+    #[test]
+    fn notification_auth_success_uses_message_field() {
+        let hook = serde_json::json!({
+            "session_id": "abc123",
+            "cwd": "/home/user/project",
+            "hook_event_name": "Notification",
+            "notification_type": "auth_success",
+            "message": "Authenticated successfully"
+        });
+        let msgs = convert_claude_code(&hook).unwrap();
+        assert_eq!(msgs.len(), 1);
+        let json = serde_json::to_string(&msgs[0]).unwrap();
+        assert!(json.contains("needs_attention"));
+        assert!(json.contains("Authenticated successfully"));
+    }
+
+    #[test]
+    fn notification_elicitation_dialog_uses_message_field() {
+        let hook = serde_json::json!({
+            "session_id": "abc123",
+            "cwd": "/home/user/project",
+            "hook_event_name": "Notification",
+            "notification_type": "elicitation_dialog",
+            "message": "Choose an option"
+        });
+        let msgs = convert_claude_code(&hook).unwrap();
+        assert_eq!(msgs.len(), 1);
+        let json = serde_json::to_string(&msgs[0]).unwrap();
+        assert!(json.contains("needs_attention"));
+        assert!(json.contains("Choose an option"));
+    }
+
+    #[test]
+    fn activity_hooks_all_produce_same_event_type() {
+        let hooks = vec![
+            serde_json::json!({
+                "session_id": "abc123",
+                "cwd": "/home/user/project",
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "fix the bug"
+            }),
+            serde_json::json!({
+                "session_id": "abc123",
+                "cwd": "/home/user/project",
+                "hook_event_name": "SubagentStart",
+                "agent_type": "Explore"
+            }),
+            serde_json::json!({
+                "session_id": "abc123",
+                "cwd": "/home/user/project",
+                "hook_event_name": "SubagentStop",
+                "agent_type": "Explore"
+            }),
+        ];
+
+        for hook in &hooks {
+            let event_name = hook["hook_event_name"].as_str().unwrap();
+            let msgs = convert_claude_code(hook).unwrap();
+            assert_eq!(msgs.len(), 1, "{event_name} should produce exactly one event");
+            let json = serde_json::to_string(&msgs[0]).unwrap();
+            assert!(
+                json.contains("\"type\":\"activity\""),
+                "{event_name} should produce Activity, got: {json}"
+            );
+            assert!(
+                json.contains("\"session_id\":\"abc123\""),
+                "{event_name} should preserve session_id"
+            );
+        }
     }
 
     #[test]
