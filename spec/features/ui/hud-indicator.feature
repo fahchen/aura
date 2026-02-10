@@ -56,25 +56,17 @@ Feature: HUD Indicator
       When the user clicks the indicator
       Then nothing happens
 
-  Rule: Click actions are disambiguated by debounce
+  Rule: Right-click cycles the theme
 
-    Scenario: Single-click is delayed by the OS double-click interval
-      Given the session list is collapsed
-      When the user clicks the indicator once
-      Then the single-click action is delayed by the system double-click interval
-      And the session list expands after the interval elapses
-
-    Scenario: Triple-click cycles theme without toggling session list
+    Scenario: Right-click cycles to next theme
       Given the current theme is "Liquid Dark"
-      And the session list is collapsed
-      When the user triple-clicks the indicator
+      When the user right-clicks the indicator
       Then the theme changes to the next in the cycle
-      And the session list remains collapsed
 
-    Scenario: Double-click is ignored
+    Scenario: Right-click does not toggle session list
       Given the session list is collapsed
-      When the user double-clicks the indicator
-      Then nothing happens
+      When the user right-clicks the indicator
+      Then the session list remains collapsed
 
   Rule: Indicator is draggable
 

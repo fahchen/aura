@@ -35,9 +35,6 @@ dirs = "6"
 # Atomic file writes
 tempfile = "3"
 
-# macOS FFI (transitive via gpui, pinned to same version)
-objc = "0.2"
-
 # Text
 unicode-width = "0.2"
 chrono = "0.4"

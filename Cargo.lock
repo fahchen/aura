@@ -494,7 +494,6 @@ dependencies = [
  "clap",
  "dirs 6.0.0",
  "gpui",
- "objc",
  "serde",
  "serde_json",
  "tempfile",
