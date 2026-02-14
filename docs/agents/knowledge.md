@@ -6,7 +6,7 @@ Implementation patterns and design decisions.
 
 ### Threading Model
 
-**Rule:** Main thread runs gpui (HUD windows, must not block). Background thread runs tokio runtime (IPC server, Codex client). Shared state via `Arc<Mutex<SessionRegistry>>`.
+**Rule:** Main thread runs gpui (HUD windows, must not block). Background thread runs tokio runtime (IPC server, agent integrations). Shared state via `Arc<Mutex<SessionRegistry>>`.
 
 **Why:** gpui requires main thread ownership. Async I/O must not block the UI.
 
