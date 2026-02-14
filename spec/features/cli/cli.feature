@@ -11,7 +11,7 @@ Feature: CLI
       Then the HUD daemon starts
       And the indicator window appears
       And the Unix socket server begins listening
-      And the Codex app-server client starts
+      And the Codex rollout watcher starts
 
   Rule: Verbosity controls log output
 

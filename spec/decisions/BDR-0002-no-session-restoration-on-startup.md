@@ -16,7 +16,7 @@ When the Aura daemon restarts, it could attempt to restore previously known sess
 ## Behaviours Considered
 
 ### Option A: Clean start (no restoration)
-Start with an empty session registry. Sessions only appear when live hook events or Codex app-server notifications arrive.
+Start with an empty session registry. Sessions only appear when live hook events or Codex rollout events arrive.
 
 ### Option B: Restore from persisted state
 Save session state to disk on shutdown and reload on startup, showing previously active sessions.

@@ -1,86 +1,82 @@
 @integration @codex
 Feature: Codex Integration
   As a developer using Codex
-  I want Aura to monitor my sessions via app-server
+  I want Aura to monitor my sessions via session rollout files
   So that the HUD reflects what Codex is doing in real time
 
   Background:
     Given the Aura daemon is running
 
-  Rule: Codex communicates via JSON-RPC over stdio
+  Rule: Aura watches Codex rollouts on disk
 
-    Scenario: Daemon spawns Codex app-server
+    Scenario: Daemon spawns Codex rollout watcher
       When the daemon starts
-      Then it spawns a "codex app-server" subprocess
-      And communicates via JSON-RPC over stdio
+      Then it starts watching "~/.codex/sessions/**.jsonl"
+      And it publishes best-effort AgentEvents for "Codex"
 
-    Scenario: Initialize handshake
-      When the app-server subprocess starts
-      Then Aura sends an "initialize" request
-      And follows with an "initialized" notification
+    Scenario: CODEX_HOME overrides the default path
+      Given the environment variable "CODEX_HOME" is set
+      When the daemon starts
+      Then it watches "$CODEX_HOME/sessions/**.jsonl"
 
-  Rule: Thread events map to session events
+  Rule: Rollout bootstrap is bounded
 
-    Scenario: Thread started creates a session
-      When a "thread/started" notification arrives with thread_id "t1"
-      Then session "t1" is created with agent type "Codex"
+    Scenario: Recent rollout creates a session and replays a small tail
+      Given a rollout file was modified within 10 minutes
+      When Aura discovers the rollout
+      Then session "sess_1" is created with agent type "Codex"
+      And at most 4 recent AgentEvents are replayed to seed the HUD
 
-    Scenario: Turn started marks session running
-      Given session "t1" exists
-      When a "turn/started" notification arrives
-      Then session "t1" state is "Running"
+    Scenario: Stale rollouts are hidden until they change
+      Given a rollout file was last modified more than 10 minutes ago
+      When Aura discovers the rollout
+      Then no session is created for that rollout
+      But the rollout remains watched for future changes
 
-    Scenario: Turn completed marks session idle
-      Given session "t1" is in "Running" state
-      When a "turn/completed" notification arrives
-      Then session "t1" state is "Idle"
+  Rule: Rollout lines map to AgentEvents
 
-    Scenario: Item started tracks a tool
-      Given session "t1" is in "Running" state
-      When an "item/started" notification arrives with type "commandExecution"
-      Then session "t1" has a running tool
+    Scenario: session_meta starts a session
+      When a "session_meta" line arrives with id "sess_1"
+      Then session "sess_1" is created with agent type "Codex"
 
-    Scenario: Item completed removes a tool
-      Given session "t1" has a running tool with id "i1"
-      When an "item/completed" notification arrives for item "i1"
-      Then session "t1" no longer has that running tool
+    Scenario: function_call starts a tool
+      Given session "sess_1" exists
+      When a response item "function_call" arrives with call_id "call_1"
+      Then session "sess_1" has a running tool "call_1"
 
-  Rule: Approval requests trigger Attention state
+    Scenario: function_call_output completes a tool
+      Given session "sess_1" has a running tool "call_1"
+      When a response item "function_call_output" arrives for call_id "call_1"
+      Then session "sess_1" no longer has that running tool
 
-    Scenario: Command execution approval
-      When an "item/commandExecution/requestApproval" request arrives
-      Then session state is "Attention"
+    Scenario: task_complete marks the session idle
+      Given session "sess_1" is in "Running" state
+      When an event_msg line arrives with type "task_complete"
+      Then session "sess_1" state is "Idle"
 
-    Scenario: File change approval
-      When an "item/fileChange/requestApproval" request arrives
-      Then session state is "Attention"
+    Scenario: request_user_input marks the session waiting
+      Given session "sess_1" exists
+      When an event_msg line arrives with type "request_user_input"
+      Then session "sess_1" state is "Waiting"
 
-    Scenario: User input request triggers Waiting
-      When a "tool/requestUserInput" request arrives
-      Then session state is "Waiting"
+    Scenario: context_compacted marks the session compacting
+      Given session "sess_1" exists
+      When an event_msg line arrives with type "context_compacted"
+      Then session "sess_1" state is "Compacting"
 
-  Rule: Session names are derived from turn previews
+  Rule: Session names are derived from aura set-name
 
-    Scenario: Name extracted from turn/started preview
-      Given session "t1" exists
-      When a "turn/started" notification arrives with a preview message
-      Then session "t1" name is updated from the preview text
+    Scenario: aura set-name updates the session name
+      Given session "sess_1" exists
+      When an exec_command tool call runs "aura set-name \"fix login bug\""
+      Then session "sess_1" name is "fix login bug"
 
-  Rule: Thread discovery finds existing sessions
+  Rule: Rollout watching is best-effort
 
-    Scenario: Discovering existing threads
-      When Aura polls "thread/list" periodically
-      And a thread exists that Aura is not tracking
-      Then Aura resumes the thread and creates a session
-
-  Rule: Reconnection with exponential backoff
-
-    Scenario: App-server disconnects
-      When the Codex app-server process exits unexpectedly
-      Then Aura attempts reconnection with exponential backoff
-      And backoff increases from 1 second up to 60 seconds
-
-  Rule: Stale Codex sessions are not auto-removed
+    Scenario: Missed filesystem events do not crash the daemon
+      When filesystem notifications are dropped
+      Then Aura triggers a rescan of the sessions directory
+      And continues tailing rollouts best-effort
 
     Scenario: Codex session goes stale
       Given session "t1" is in "Idle" state
