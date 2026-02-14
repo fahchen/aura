@@ -92,16 +92,15 @@ impl SessionState {
     /// Hex color for this state
     pub fn color(&self) -> &'static str {
         match self {
-            Self::Running => "#22C55E",   // Green
-            Self::Idle => "#3B82F6",      // Blue
-            Self::Attention => "#EAB308", // Yellow
-            Self::Waiting => "#EAB308",   // Yellow (same as Attention)
+            Self::Running => "#22C55E",    // Green
+            Self::Idle => "#3B82F6",       // Blue
+            Self::Attention => "#EAB308",  // Yellow
+            Self::Waiting => "#EAB308",    // Yellow (same as Attention)
             Self::Compacting => "#A855F7", // Purple
-            Self::Stale => "#6B7280",     // Gray
+            Self::Stale => "#6B7280",      // Gray
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

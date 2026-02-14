@@ -32,7 +32,8 @@ mod tests {
 
     #[test]
     fn agent_event_ipc_session_started() {
-        let json = r#"{"type":"session_started","session_id":"abc","cwd":"/path","agent":"claude_code"}"#;
+        let json =
+            r#"{"type":"session_started","session_id":"abc","cwd":"/path","agent":"claude_code"}"#;
         let event: AgentEvent = serde_json::from_str(json).unwrap();
         assert_eq!(event.session_id(), "abc");
         assert_eq!(event.cwd(), "/path");

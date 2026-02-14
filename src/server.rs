@@ -3,11 +3,11 @@
 //! Listens on `/tmp/aura.sock` for newline-delimited JSON messages.
 //! Each message is deserialized directly as an `AgentEvent`.
 
-use crate::ipc;
 use crate::AgentEvent;
+use crate::ipc;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::UnixListener;
@@ -19,14 +19,13 @@ use crate::registry::SessionRegistry;
 ///
 /// Removes any stale socket file, binds to the path, and spawns a task
 /// that accepts connections and processes messages.
-pub async fn start(
-    registry: Arc<Mutex<SessionRegistry>>,
-    dirty: Arc<AtomicBool>,
-) {
+pub async fn start(registry: Arc<Mutex<SessionRegistry>>, dirty: Arc<AtomicBool>) {
     let path = ipc::socket_path();
 
     // Remove stale socket if it exists
-    if path.exists() && let Err(e) = std::fs::remove_file(&path) {
+    if path.exists()
+        && let Err(e) = std::fs::remove_file(&path)
+    {
         warn!("Failed to remove stale socket {}: {}", path.display(), e);
         return;
     }

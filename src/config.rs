@@ -15,7 +15,16 @@ use std::path::{Path, PathBuf};
 /// User preferences (persisted to config.json).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Theme name: "system", "liquid-dark", "liquid-light", "solid-dark", "solid-light"
+    /// Theme name persisted from the UI.
+    ///
+    /// Currently recognized values:
+    /// - "system"
+    /// - "liquid-dark"
+    /// - "liquid-light"
+    ///
+    /// Older values may still exist on disk (e.g. "solid-dark") and are preserved
+    /// as raw strings for backwards compatibility; the UI theme mapper can choose
+    /// how to handle unknown values.
     #[serde(default = "default_theme")]
     pub theme: String,
 }
@@ -37,7 +46,7 @@ impl Default for Config {
 // ---------------------------------------------------------------------------
 
 /// Runtime state (persisted to state.json).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct State {
     /// Indicator X position (logical pixels from left edge).
     #[serde(default)]
@@ -45,15 +54,6 @@ pub struct State {
     /// Indicator Y position (logical pixels from top edge).
     #[serde(default)]
     pub indicator_y: Option<f64>,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            indicator_x: None,
-            indicator_y: None,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -84,9 +84,8 @@ pub fn load_config() -> Config {
 
 /// Save config to disk.
 pub fn save_config(config: &Config) -> Result<(), std::io::Error> {
-    let dir = config_dir().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::NotFound, "config dir not found")
-    })?;
+    let dir = config_dir()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "config dir not found"))?;
     save_config_to(config, &dir.join("config.json"))
 }
 
@@ -104,9 +103,8 @@ pub fn load_state() -> State {
 
 /// Save state to disk.
 pub fn save_state(state: &State) -> Result<(), std::io::Error> {
-    let dir = data_dir().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::NotFound, "data dir not found")
-    })?;
+    let dir = data_dir()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "data dir not found"))?;
     save_state_to(state, &dir.join("state.json"))
 }
 
@@ -126,7 +124,7 @@ fn save_config_to(config: &Config, path: &Path) -> Result<(), std::io::Error> {
         std::fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_string_pretty(config)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        .map_err(std::io::Error::other)?;
     atomic_write(path, json.as_bytes())
 }
 
@@ -142,7 +140,7 @@ fn save_state_to(state: &State, path: &Path) -> Result<(), std::io::Error> {
         std::fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_string_pretty(state)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        .map_err(std::io::Error::other)?;
     atomic_write(path, json.as_bytes())
 }
 

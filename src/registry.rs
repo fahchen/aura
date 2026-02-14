@@ -125,7 +125,11 @@ impl Session {
         if label.is_empty() {
             return;
         }
-        if self.recent_activity.back().is_some_and(|last| last == &label) {
+        if self
+            .recent_activity
+            .back()
+            .is_some_and(|last| last == &label)
+        {
             return;
         }
         if let Some(pos) = self
@@ -196,10 +200,13 @@ impl SessionRegistry {
     ) where
         F: FnOnce(&mut Session),
     {
-        let session = self.sessions.entry(session_id.to_string()).or_insert_with(|| {
-            info!(%session_id, %cwd, ?default_agent, "late session registration");
-            Session::new(session_id.to_string(), cwd.to_string(), default_agent)
-        });
+        let session = self
+            .sessions
+            .entry(session_id.to_string())
+            .or_insert_with(|| {
+                info!(%session_id, %cwd, ?default_agent, "late session registration");
+                Session::new(session_id.to_string(), cwd.to_string(), default_agent)
+            });
         session.touch();
         updater(session);
     }
@@ -247,7 +254,11 @@ impl SessionRegistry {
             } => {
                 debug!(%session_id, %tool_name, "tool started");
                 self.update_session(&session_id, &cwd, default_agent.clone(), |session| {
-                    session.add_tool(RunningTool { tool_id, tool_name, tool_label });
+                    session.add_tool(RunningTool {
+                        tool_id,
+                        tool_name,
+                        tool_label,
+                    });
                 });
             }
 
@@ -375,6 +386,11 @@ impl SessionRegistry {
         self.sessions.len()
     }
 
+    /// Check if a session exists by ID
+    pub fn has_session(&self, session_id: &str) -> bool {
+        self.sessions.contains_key(session_id)
+    }
+
     /// Check if registry is empty
     pub fn is_empty(&self) -> bool {
         self.sessions.is_empty()
@@ -420,7 +436,11 @@ mod tests {
         let sessions = registry.get_all();
         // Tool should still be visible due to MIN_TOOL_DISPLAY
         assert_eq!(sessions[0].running_tools.len(), 1);
-        assert!(sessions[0].running_tools[0].tool_id.starts_with(RECENT_TOOL_PREFIX));
+        assert!(
+            sessions[0].running_tools[0]
+                .tool_id
+                .starts_with(RECENT_TOOL_PREFIX)
+        );
 
         // Idle
         registry.process_event(AgentEvent::Idle {
@@ -596,7 +616,11 @@ mod tests {
         let sessions = registry.get_all();
         assert_eq!(sessions[0].running_tools.len(), 1);
         assert_eq!(sessions[0].running_tools[0].tool_name, "Read");
-        assert!(sessions[0].running_tools[0].tool_id.starts_with(RECENT_TOOL_PREFIX));
+        assert!(
+            sessions[0].running_tools[0]
+                .tool_id
+                .starts_with(RECENT_TOOL_PREFIX)
+        );
 
         // Verify the internal recent_tools has the expiration set
         let session = registry.sessions.get("s1").unwrap();
