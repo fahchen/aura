@@ -1,1 +1,6 @@
 /target
+
+# Local planning artifacts (untracked)
+/task_plan.md
+/progress.md
+/findings.md
