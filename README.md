@@ -10,18 +10,14 @@ Aura monitors AI coding agents as they work, displaying session state and active
 - Real-time tool visibility (Read, Write, Grep, Bash, etc.)
 - Six session states: Running, Idle, Attention, Waiting, Compacting, Stale
 - Multi-session tracking with minimal 36×36 collapsed indicator
-- Five themes: System, Liquid Dark/Light, Solid Dark/Light
-- Supports Claude Code (hooks) and Codex (app-server)
+- Three themes: System, Liquid Dark/Light
+- Supports Claude Code (hooks) and Codex (session rollouts)
 
 ## Screenshots
 
 | Liquid Dark | Liquid Light |
 |-------------|--------------|
 | ![Liquid Dark](docs/screenshots/theme-liquid-dark.png) | ![Liquid Light](docs/screenshots/theme-liquid-light.png) |
-
-| Solid Dark | Solid Light |
-|------------|-------------|
-| ![Solid Dark](docs/screenshots/theme-solid-dark.png) | ![Solid Light](docs/screenshots/theme-solid-light.png) |
 
 ## Session States
 

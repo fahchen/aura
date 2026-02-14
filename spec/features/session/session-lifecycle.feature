@@ -12,7 +12,7 @@ Feature: Session Lifecycle
     Scenario: No sessions restored on startup
       When the daemon starts
       Then the session registry is empty
-      And no sessions are loaded from disk or files
+      And Aura does not restore sessions from persisted daemon state
 
   Rule: Six distinct session states
 

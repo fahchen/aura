@@ -16,13 +16,13 @@ Implementation patterns and design decisions.
 
 **Rule:** Two integration patterns:
 - **Hooks** (Claude Code): `aura hook --agent claude-code` receives JSON via stdin, forwards to daemon over Unix socket
-- **App-server** (Codex): Daemon spawns `codex app-server`, communicates via JSON-RPC over stdio
+- **Rollouts** (Codex): Daemon watches `~/.codex/sessions/**.jsonl` (or `$CODEX_HOME/sessions`) and tails appended JSONL events
 
-**Reference:** `src/agents/claude_code.rs`, `src/agents/codex.rs`
+**Reference:** `src/agents/claude_code.rs`, `src/agents/codex/mod.rs`, `src/agents/codex/sessions.rs`
 
 ### Event Flow
 
-**Rule:** Hook events → Unix socket → `SessionRegistry`. Codex events → JSON-RPC → `SessionRegistry`. gpui polls registry each frame → renders Indicator + SessionList windows.
+**Rule:** Hook events → Unix socket → `SessionRegistry`. Codex rollouts → filesystem watcher + JSONL tailer → `SessionRegistry`. gpui polls registry each frame → renders Indicator + SessionList windows.
 
 **Reference:** `src/server.rs` (IPC), `src/registry.rs` (state machine)
 
@@ -34,7 +34,7 @@ Implementation patterns and design decisions.
 - **Running** → Idle (Stop), Attention (permission needed), Waiting (idle_prompt), Compacting (PreCompact)
 - **Idle / Attention / Waiting / Compacting** → Running (on new activity)
 - **Idle** → Stale (10min per-session timer, resets on events)
-- Daemon starts with empty registry — no session restoration from disk
+- Daemon starts with empty registry — Aura does not restore its own session state from disk
 - Stale sessions are never auto-removed (user removes manually)
 
 **Why:** Each state maps to a distinct user action (or non-action). See `spec/decisions/BDR-0002` and `BDR-0003`.

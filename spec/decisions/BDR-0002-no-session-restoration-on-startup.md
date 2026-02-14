@@ -3,7 +3,7 @@ id: BDR-0002
 title: No session restoration on startup
 status: accepted
 date: 2026-02-07
-summary: Daemon starts with empty registry; only live events populate sessions
+summary: Daemon starts with empty registry; sessions are driven by external event sources, not persisted Aura state
 ---
 
 **Feature**: session/session-lifecycle.feature
@@ -16,7 +16,7 @@ When the Aura daemon restarts, it could attempt to restore previously known sess
 ## Behaviours Considered
 
 ### Option A: Clean start (no restoration)
-Start with an empty session registry. Sessions only appear when live hook events or Codex rollout events arrive.
+Start with an empty session registry. Sessions only appear when external sources (hook events, Codex rollouts) emit events.
 
 ### Option B: Restore from persisted state
 Save session state to disk on shutdown and reload on startup, showing previously active sessions.

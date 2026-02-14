@@ -21,7 +21,7 @@ bun install && bun dev  # Dev server at localhost:5173
 
 ## Architecture
 
-Aura is a floating HUD that monitors AI coding sessions via hooks and app-server integration. Single crate: `src/` with `agents/` (hook parsers, Codex JSON-RPC client), `ui/` (two-window HUD, animations, themes), and core modules (event types, session state machine, registry, IPC server).
+Aura is a floating HUD that monitors AI coding sessions via hooks (Claude Code) and Codex session rollout JSONL files. Single crate: `src/` with `agents/` (hook parsers, Codex rollout watcher), `ui/` (two-window HUD, animations, themes), and core modules (event types, session state machine, registry, IPC server).
 
 ## CLI Usage
 
