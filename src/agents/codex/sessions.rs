@@ -573,56 +573,68 @@ async fn bootstrap_rollout(watched: &mut WatchedRollout, tx: &broadcast::Sender<
 }
 
 async fn tail_rollout(watched: &mut WatchedRollout, tx: &broadcast::Sender<AgentEvent>) {
-    let Some(len) = file_len(&watched.path).await else {
-        return;
-    };
-
-    if len < watched.offset {
-        debug!(path = %watched.path.display(), "codex rollout truncated; resetting cursor");
-        watched.offset = 0;
-        watched.buffer.clear();
-        watched.state.session_emitted = false;
-    }
-
-    if len == watched.offset {
-        return;
-    }
-
-    let start_offset = watched.offset;
-    let mut file = match tokio::fs::File::open(&watched.path).await {
-        Ok(f) => f,
-        Err(e) => {
-            debug!(path = %watched.path.display(), error = %e, "failed to open codex rollout");
-            return;
-        }
-    };
-
-    if let Err(e) = file.seek(std::io::SeekFrom::Start(watched.offset)).await {
-        debug!(path = %watched.path.display(), error = %e, "failed to seek codex rollout");
-        return;
-    }
-
-    let mut buf = Vec::new();
-    if let Err(e) = file.read_to_end(&mut buf).await {
-        debug!(path = %watched.path.display(), error = %e, "failed to read codex rollout");
-        return;
-    }
-    watched.offset = start_offset + buf.len() as u64;
-
-    watched.buffer.push_str(&String::from_utf8_lossy(&buf));
-
-    // Process complete JSONL lines, leaving any partial line in `buffer`.
-    let path = watched.path.clone();
-    let state = &mut watched.state;
-    let buffer = &mut watched.buffer;
-    drain_jsonl_lines(buffer, |line| {
-        let Some(value) = parse_json_line(path.as_path(), line, "malformed JSON in codex rollout")
-        else {
+    loop {
+        let Some(len) = file_len(&watched.path).await else {
             return;
         };
-        let events = state.apply_line(&value);
-        emit_events(tx, events);
-    });
+
+        if len < watched.offset {
+            debug!(path = %watched.path.display(), "codex rollout truncated; resetting cursor");
+            watched.offset = 0;
+            watched.buffer.clear();
+            watched.state.session_emitted = false;
+
+            // A truncation is effectively a new rollout stream. Re-bootstrap immediately
+            // so we don't replay the full history and flood the HUD.
+            bootstrap_rollout(watched, tx).await;
+
+            // Catch any bytes appended during the bootstrap scan.
+            continue;
+        }
+
+        if len == watched.offset {
+            return;
+        }
+
+        let start_offset = watched.offset;
+        let mut file = match tokio::fs::File::open(&watched.path).await {
+            Ok(f) => f,
+            Err(e) => {
+                debug!(path = %watched.path.display(), error = %e, "failed to open codex rollout");
+                return;
+            }
+        };
+
+        if let Err(e) = file.seek(std::io::SeekFrom::Start(watched.offset)).await {
+            debug!(path = %watched.path.display(), error = %e, "failed to seek codex rollout");
+            return;
+        }
+
+        let mut buf = Vec::new();
+        if let Err(e) = file.read_to_end(&mut buf).await {
+            debug!(path = %watched.path.display(), error = %e, "failed to read codex rollout");
+            return;
+        }
+        watched.offset = start_offset + buf.len() as u64;
+
+        watched.buffer.push_str(&String::from_utf8_lossy(&buf));
+
+        // Process complete JSONL lines, leaving any partial line in `buffer`.
+        let path = watched.path.clone();
+        let state = &mut watched.state;
+        let buffer = &mut watched.buffer;
+        drain_jsonl_lines(buffer, |line| {
+            let Some(value) =
+                parse_json_line(path.as_path(), line, "malformed JSON in codex rollout")
+            else {
+                return;
+            };
+            let events = state.apply_line(&value);
+            emit_events(tx, events);
+        });
+
+        return;
+    }
 }
 
 #[derive(Debug, Default)]
@@ -1189,5 +1201,87 @@ mod tests {
                 other => panic!("expected Activity event, got: {other:?}"),
             }
         }
+    }
+
+    #[tokio::test]
+    async fn truncation_re_bootstraps_instead_of_replaying_full_history() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("rollout-2026-02-14-sess_1.jsonl");
+
+        let set_name_args = serde_json::json!({ "cmd": "aura set-name \"named session\"" });
+        let set_name_args_str = serde_json::to_string(&set_name_args).unwrap();
+        let rg_args = serde_json::json!({ "cmd": "rg -n foo src" });
+        let rg_args_str = serde_json::to_string(&rg_args).unwrap();
+
+        write_jsonl(
+            &path,
+            &[
+                json!({
+                    "type": "session_meta",
+                    "payload": { "id": "sess_1", "cwd": "/tmp/project" }
+                }),
+                json!({
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call",
+                        "call_id": "call_set",
+                        "name": "exec_command",
+                        "arguments": set_name_args_str
+                    }
+                }),
+                json!({ "type": "event_msg", "payload": { "type": "task_started" } }),
+                json!({
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call",
+                        "call_id": "call_rg",
+                        "name": "exec_command",
+                        "arguments": rg_args_str
+                    }
+                }),
+                json!({
+                    "type": "response_item",
+                    "payload": { "type": "function_call_output", "call_id": "call_rg" }
+                }),
+                json!({ "type": "event_msg", "payload": { "type": "task_complete" } }),
+                json!({ "type": "event_msg", "payload": { "type": "context_compacted" } }),
+                json!({ "type": "event_msg", "payload": { "type": "request_user_input" } }),
+            ],
+        );
+
+        let file_len = std::fs::metadata(&path).unwrap().len();
+        let (tx, mut rx) = broadcast::channel(32);
+
+        // Simulate "we were at a later offset" and the file got truncated.
+        let mut watched = WatchedRollout::new_existing(
+            path.clone(),
+            "fallback".to_string(),
+            "".to_string(),
+            file_len + 10,
+        );
+        watched.state.session_emitted = true;
+
+        tail_rollout(&mut watched, &tx).await;
+
+        let events = drain_rx(&mut rx);
+        assert_eq!(events.len(), 6);
+
+        match (&events[0], &events[1]) {
+            (
+                AgentEvent::SessionStarted { session_id, cwd, agent },
+                AgentEvent::SessionNameUpdated { session_id: s2, name },
+            ) => {
+                assert_eq!(session_id, "sess_1");
+                assert_eq!(cwd, "/tmp/project");
+                assert_eq!(agent, &AgentType::Codex);
+                assert_eq!(s2, "sess_1");
+                assert_eq!(name, "named session");
+            }
+            other => panic!("unexpected bootstrap events: {other:?}"),
+        }
+
+        // Bounded replay tail stays small (we should not replay the entire file).
+        assert_eq!(watched.offset, file_len);
+        assert!(watched.state.session_emitted);
     }
 }
