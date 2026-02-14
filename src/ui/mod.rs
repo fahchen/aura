@@ -17,42 +17,44 @@ pub(crate) mod indicator;
 pub(crate) mod session_list;
 pub(crate) mod theme;
 
-
+use crate::registry::SessionRegistry;
+use crate::{SessionInfo, SessionState};
 use animation::{
     calculate_animation_state, calculate_breathe_opacity, calculate_icon_swap,
     calculate_row_slide_in, calculate_row_slide_out,
 };
 use assets::Assets;
-use crate::{SessionInfo, SessionState};
-use crate::registry::SessionRegistry;
 use gpui::{
-    actions, div, point, px, size, uniform_list, App, AppContext, Application, Bounds, Context,
-    Entity, InteractiveElement, IntoElement, Menu, MenuItem, ParentElement, Pixels, Point, Render,
-    SharedString, StatefulInteractiveElement, Styled, Window, WindowBackgroundAppearance,
-    WindowBounds, WindowHandle, WindowKind, WindowOptions,
-    prelude::FluentBuilder,
-};
-use session_list::{
-    calculate_expanded_height, extract_session_name, ROW_GAP,
-    WIDTH as EXPANDED_WIDTH, MAX_SESSIONS,
+    App, AppContext, Application, Bounds, Context, Entity, InteractiveElement, IntoElement, Menu,
+    MenuItem, ParentElement, Pixels, Point, Render, SharedString, StatefulInteractiveElement,
+    Styled, Window, WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind,
+    WindowOptions, actions, div, point, prelude::FluentBuilder, px, size, uniform_list,
 };
 use indicator::{HEIGHT as COLLAPSED_HEIGHT, WIDTH as COLLAPSED_WIDTH};
+use session_list::{
+    MAX_SESSIONS, ROW_GAP, WIDTH as EXPANDED_WIDTH, calculate_expanded_height, extract_session_name,
+};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 use std::time::Instant;
 
-
 // Define application actions
-actions!(aura, [Quit, SetThemeSystem, SetThemeLiquidDark, SetThemeLiquidLight, SetThemeSolidDark, SetThemeSolidLight]);
+actions!(
+    aura,
+    [
+        Quit,
+        SetThemeSystem,
+        SetThemeLiquidDark,
+        SetThemeLiquidLight
+    ]
+);
 
 /// Gap between indicator and session list windows
 const WINDOW_GAP: f32 = 4.0;
-
-
 
 /// Shared HUD state between indicator and session list windows
 pub(crate) struct SharedHudState {
@@ -72,7 +74,7 @@ pub(crate) struct SharedHudState {
     session_list_origin: Point<Pixels>,
     /// Indicator window handle (for getting current position)
     indicator_window: Option<WindowHandle<IndicatorView>>,
-    /// Theme style preference (System, LiquidDark, LiquidLight, SolidDark, SolidLight)
+    /// Theme style preference (System, LiquidDark, LiquidLight)
     theme_style: theme::ThemeStyle,
     /// Whether the system is currently in dark mode (detected from OS)
     system_is_dark: bool,
@@ -108,6 +110,19 @@ impl SharedHudState {
     fn refresh_from_registry(&mut self) {
         if let Ok(registry) = self.registry.lock() {
             self.sessions = registry.get_all();
+            tracing::debug!(
+                "UI refresh: {} sessions ({})",
+                self.sessions.len(),
+                self.sessions
+                    .iter()
+                    .map(|s| format!(
+                        "{}:{:?}",
+                        &s.session_id[..8.min(s.session_id.len())],
+                        s.state
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
     }
 
@@ -256,7 +271,12 @@ impl Render for IndicatorView {
                     }
                 })
             })
-            .child(indicator::render(&sessions_for_render, animation_start, is_hovered, &theme_colors))
+            .child(indicator::render(
+                &sessions_for_render,
+                animation_start,
+                is_hovered,
+                &theme_colors,
+            ))
     }
 }
 
@@ -340,10 +360,12 @@ impl SessionListView {
                 let now = Instant::now();
                 if *hovered {
                     // Starting hover
-                    this.icon_hover_at.insert(session_id_for_icon.clone(), (now, true));
+                    this.icon_hover_at
+                        .insert(session_id_for_icon.clone(), (now, true));
                 } else {
                     // Ending hover - keep the timestamp but mark as not hovered for reverse animation
-                    this.icon_hover_at.insert(session_id_for_icon.clone(), (now, false));
+                    this.icon_hover_at
+                        .insert(session_id_for_icon.clone(), (now, false));
                 }
             }))
             .child(session_list::render_row_content(
@@ -365,7 +387,10 @@ impl SessionListView {
             .when(remove_clickable, |this| {
                 this.child(
                     div()
-                        .id(SharedString::from(format!("remove-btn-{}", session_id_for_remove)))
+                        .id(SharedString::from(format!(
+                            "remove-btn-{}",
+                            session_id_for_remove
+                        )))
                         .absolute()
                         .left(px(14.0)) // Row left padding
                         .top(px(10.0)) // Row top padding
@@ -424,10 +449,10 @@ impl SessionListView {
                     tool_index,
                     fade_progress,
                     animation_start,
-                    state_opacity: 1.0,   // State icon visible
-                    state_x: 0.0,         // No x offset
-                    remove_opacity: 0.0,  // Remove icon hidden
-                    remove_x: -16.0,      // Remove icon off-screen
+                    state_opacity: 1.0,  // State icon visible
+                    state_x: 0.0,        // No x offset
+                    remove_opacity: 0.0, // Remove icon hidden
+                    remove_x: -16.0,     // Remove icon off-screen
                     theme: theme_colors,
                 },
             ))
@@ -482,7 +507,6 @@ impl Render for SessionListView {
                 .bg(theme_colors.container_bg)
                 .border_1()
                 .border_color(theme_colors.border)
-                .when(theme_colors.use_shadow, |this| this.shadow_md())
                 .child(glass::render_container_highlight(
                     theme::WINDOW_RADIUS,
                     &theme_colors,
@@ -600,7 +624,14 @@ impl Render for SessionListView {
             .removing
             .iter()
             .map(|(_, (session, removed_at))| {
-                self.render_removing_row(session, *removed_at, tool_index, fade_progress, animation_start, &theme_colors)
+                self.render_removing_row(
+                    session,
+                    *removed_at,
+                    tool_index,
+                    fade_progress,
+                    animation_start,
+                    &theme_colors,
+                )
             })
             .collect();
 
@@ -618,9 +649,11 @@ impl Render for SessionListView {
             .bg(theme_colors.container_bg)
             .border_1()
             .border_color(theme_colors.border)
-            .when(theme_colors.use_shadow, |this| this.shadow_md())
             // Top highlight for glass effect
-            .child(glass::render_container_highlight(theme::WINDOW_RADIUS, &theme_colors))
+            .child(glass::render_container_highlight(
+                theme::WINDOW_RADIUS,
+                &theme_colors,
+            ))
             // Header + Content
             .child(
                 div()
@@ -760,9 +793,6 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<Atomic
                         MenuItem::separator(),
                         MenuItem::action("Liquid Dark", SetThemeLiquidDark),
                         MenuItem::action("Liquid Light", SetThemeLiquidLight),
-                        MenuItem::separator(),
-                        MenuItem::action("Solid Dark", SetThemeSolidDark),
-                        MenuItem::action("Solid Light", SetThemeSolidLight),
                     ],
                 }),
                 MenuItem::separator(),
@@ -780,10 +810,7 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<Atomic
         let screen_width = display_bounds.size.width;
 
         // Get initial sessions from registry
-        let initial_sessions = registry
-            .lock()
-            .map(|r| r.get_all())
-            .unwrap_or_default();
+        let initial_sessions = registry.lock().map(|r| r.get_all()).unwrap_or_default();
 
         // Generate random seed from system time for varied animation timing
         let animation_seed = std::time::SystemTime::now()
@@ -793,25 +820,27 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<Atomic
 
         // Load saved indicator position, clamped to visible display bounds
         let saved_state = crate::config::load_state();
-        let default_x = (screen_width - px(EXPANDED_WIDTH)) / 2.0 + px((EXPANDED_WIDTH - COLLAPSED_WIDTH) / 2.0);
+        let default_x = (screen_width - px(EXPANDED_WIDTH)) / 2.0
+            + px((EXPANDED_WIDTH - COLLAPSED_WIDTH) / 2.0);
         let default_y = px(30.0);
-        let (indicator_x, indicator_y) = if let (Some(x), Some(y)) = (saved_state.indicator_x, saved_state.indicator_y) {
-            let x = px(x as f32);
-            let y = px(y as f32);
-            let db = display_bounds;
-            // Clamp so the indicator stays fully on-screen
-            let min_x = db.origin.x;
-            let max_x = db.origin.x + db.size.width - px(COLLAPSED_WIDTH);
-            let min_y = db.origin.y;
-            let max_y = db.origin.y + db.size.height - px(COLLAPSED_HEIGHT);
-            if x >= min_x && x <= max_x && y >= min_y && y <= max_y {
-                (x, y)
+        let (indicator_x, indicator_y) =
+            if let (Some(x), Some(y)) = (saved_state.indicator_x, saved_state.indicator_y) {
+                let x = px(x as f32);
+                let y = px(y as f32);
+                let db = display_bounds;
+                // Clamp so the indicator stays fully on-screen
+                let min_x = db.origin.x;
+                let max_x = db.origin.x + db.size.width - px(COLLAPSED_WIDTH);
+                let min_y = db.origin.y;
+                let max_y = db.origin.y + db.size.height - px(COLLAPSED_HEIGHT);
+                if x >= min_x && x <= max_x && y >= min_y && y <= max_y {
+                    (x, y)
+                } else {
+                    (default_x, default_y)
+                }
             } else {
                 (default_x, default_y)
-            }
-        } else {
-            (default_x, default_y)
-        };
+            };
 
         // Calculate session list origin (below indicator)
         let session_list_origin = point(
@@ -866,22 +895,6 @@ pub fn run_hud(registry: Arc<Mutex<SessionRegistry>>, registry_dirty: Arc<Atomic
         app.on_action(move |_: &SetThemeLiquidLight, cx: &mut App| {
             state_for_liquid_light.update(cx, |state, _cx| {
                 state.theme_style = theme::ThemeStyle::LiquidLight;
-                save_theme(state.theme_style);
-            });
-        });
-
-        let state_for_solid_dark = shared_state.clone();
-        app.on_action(move |_: &SetThemeSolidDark, cx: &mut App| {
-            state_for_solid_dark.update(cx, |state, _cx| {
-                state.theme_style = theme::ThemeStyle::SolidDark;
-                save_theme(state.theme_style);
-            });
-        });
-
-        let state_for_solid_light = shared_state.clone();
-        app.on_action(move |_: &SetThemeSolidLight, cx: &mut App| {
-            state_for_solid_light.update(cx, |state, _cx| {
-                state.theme_style = theme::ThemeStyle::SolidLight;
                 save_theme(state.theme_style);
             });
         });
@@ -1024,8 +1037,6 @@ mod tests {
         let expected = [
             theme::ThemeStyle::LiquidDark,
             theme::ThemeStyle::LiquidLight,
-            theme::ThemeStyle::SolidDark,
-            theme::ThemeStyle::SolidLight,
             theme::ThemeStyle::System, // wraps back
         ];
 
@@ -1051,8 +1062,8 @@ mod tests {
 
         state.read_with(cx, |s, _| {
             let colors = s.theme_colors();
-            // Dark system should use shadow (liquid dark)
-            assert!(colors.use_shadow);
+            // Dark system resolves to liquid dark
+            assert!(colors.text_primary.a > 0.9);
         });
     }
 
@@ -1066,23 +1077,8 @@ mod tests {
 
         state.read_with(cx, |s, _| {
             let colors = s.theme_colors();
-            // Light system should use shadow (liquid light)
-            assert!(colors.use_shadow);
-        });
-    }
-
-    #[gpui::test]
-    async fn theme_colors_solid_uses_shadow(cx: &mut TestAppContext) {
-        let state = cx.new(|_cx| {
-            let mut s = SharedHudState::new_for_test(vec![]);
-            s.theme_style = theme::ThemeStyle::SolidDark;
-            s
-        });
-
-        state.read_with(cx, |s, _| {
-            let colors = s.theme_colors();
-            // All themes use shadow (implemented in Phase 3.1)
-            assert!(colors.use_shadow);
+            // Light system resolves to liquid light
+            assert!(colors.text_primary.l < 0.2);
         });
     }
 
@@ -1296,9 +1292,8 @@ mod tests {
         state.read_with(cx, |s, _| {
             assert!(s.system_is_dark);
             let colors = s.theme_colors();
-            // System + dark → liquid dark → uses shadow
-            assert!(colors.use_shadow);
+            // System + dark → liquid dark
+            assert!(colors.text_primary.a > 0.9);
         });
     }
-
 }

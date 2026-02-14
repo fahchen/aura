@@ -95,4 +95,3 @@ Feature: HUD Indicator
     Scenario: Hover effect
       When the user hovers over the indicator
       Then the indicator scales to 1.08x
-      And the shadow is enhanced

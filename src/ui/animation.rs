@@ -7,7 +7,6 @@ pub const CYCLE_DURATION_MIN_MS: u64 = 1500; // Min time showing each tool
 pub const CYCLE_DURATION_MAX_MS: u64 = 2000; // Max time showing each tool
 pub const FADE_DURATION_MS: u64 = 500; // Cross-fade duration
 
-
 /// Simple hash function for deterministic pseudo-random per cycle
 pub fn cycle_hash(cycle: u64, seed: u64) -> u64 {
     // Combine cycle and seed, then apply multiplicative hash
@@ -104,7 +103,6 @@ pub fn calculate_breathe_opacity(start_time: Instant) -> f32 {
     center + amplitude * sine
 }
 
-
 /// Row slide-in animation duration in milliseconds
 pub const ROW_SLIDE_IN_MS: u64 = 350;
 
@@ -159,7 +157,10 @@ pub const ICON_SWAP_MS: u64 = 300;
 /// Returns (state_opacity, state_x, remove_opacity, remove_x) for the swap animation.
 /// - state_icon: opacity 1→0, x 0→16
 /// - remove_icon: opacity 0→1, x -16→0
-pub fn calculate_icon_swap(hover_started: Option<Instant>, is_hovered: bool) -> (f32, f32, f32, f32) {
+pub fn calculate_icon_swap(
+    hover_started: Option<Instant>,
+    is_hovered: bool,
+) -> (f32, f32, f32, f32) {
     let (progress, reverse) = match (hover_started, is_hovered) {
         (Some(start), true) => {
             // Hovering - animate state icon out, remove icon in
@@ -178,10 +179,20 @@ pub fn calculate_icon_swap(hover_started: Option<Instant>, is_hovered: bool) -> 
 
     let (state_opacity, state_x, remove_opacity, remove_x) = if reverse {
         // Reverse animation (unhover): state fades in, remove fades out
-        (progress, 16.0 * (1.0 - progress), 1.0 - progress, -16.0 * progress)
+        (
+            progress,
+            16.0 * (1.0 - progress),
+            1.0 - progress,
+            -16.0 * progress,
+        )
     } else {
         // Forward animation (hover): state fades out, remove fades in
-        (1.0 - progress, 16.0 * progress, progress, -16.0 * (1.0 - progress))
+        (
+            1.0 - progress,
+            16.0 * progress,
+            progress,
+            -16.0 * (1.0 - progress),
+        )
     };
 
     (state_opacity, state_x, remove_opacity, remove_x)
@@ -274,8 +285,16 @@ mod tests {
         // At start, opacity and position should be at initial values
         let start = Instant::now();
         let (opacity, x_offset) = calculate_row_slide_in(start);
-        assert!(opacity < 0.1, "Initial opacity should be near 0, got {}", opacity);
-        assert!(x_offset < -10.0, "Initial x_offset should be near -12, got {}", x_offset);
+        assert!(
+            opacity < 0.1,
+            "Initial opacity should be near 0, got {}",
+            opacity
+        );
+        assert!(
+            x_offset < -10.0,
+            "Initial x_offset should be near -12, got {}",
+            x_offset
+        );
     }
 
     #[test]

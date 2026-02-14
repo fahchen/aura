@@ -14,7 +14,7 @@ use super::animation::{calculate_shake_offset, ease_out};
 use super::icons;
 use super::theme::ThemeColors;
 use crate::{SessionInfo, SessionState};
-use gpui::{div, prelude::FluentBuilder, px, radians, svg, Div, Hsla, ParentElement, Styled, Transformation};
+use gpui::{Div, Hsla, ParentElement, Styled, Transformation, div, px, radians, svg};
 use std::time::Instant;
 
 /// Indicator dimensions (matching React prototype: 36x36px rounded square)
@@ -67,7 +67,9 @@ pub(crate) fn determine_state(sessions: &[SessionInfo]) -> IndicatorState {
 
 /// Get icon state for running animation - returns (current_icon, prev_icon, transition_progress)
 /// transition_progress: 0.0-1.0 during first 400ms of cycle, 1.0 after transition complete
-pub(crate) fn get_running_icon_state(animation_start: Instant) -> (&'static str, &'static str, f32) {
+pub(crate) fn get_running_icon_state(
+    animation_start: Instant,
+) -> (&'static str, &'static str, f32) {
     let elapsed_ms = animation_start.elapsed().as_millis() as u64;
     let icon_count = icons::INDICATOR_RUNNING_ASSETS.len();
 
@@ -98,7 +100,12 @@ pub(crate) fn get_running_icon_state(animation_start: Instant) -> (&'static str,
 /// When `is_hovered` is true, applies enhanced visual effect:
 /// - Increased background opacity
 /// - Brighter gloss highlight
-pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bool, theme: &ThemeColors) -> Div {
+pub fn render(
+    sessions: &[SessionInfo],
+    animation_start: Instant,
+    is_hovered: bool,
+    theme: &ThemeColors,
+) -> Div {
     let state = determine_state(sessions);
 
     // Get running icon state (may include transition)
@@ -116,13 +123,23 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bo
     let hover_gloss_boost = if is_hovered { 0.10 } else { 0.0 };
 
     let (icon_path, bg_alpha_boost, icon_alpha, gloss_alpha_boost) = match state {
-        IndicatorState::Attention => (ICON_ATTENTION, 0.02 + hover_bg_boost, 0.95, 0.01 + hover_gloss_boost),
+        IndicatorState::Attention => (
+            ICON_ATTENTION,
+            0.02 + hover_bg_boost,
+            0.95,
+            0.01 + hover_gloss_boost,
+        ),
         IndicatorState::Waiting => (ICON_WAITING, hover_bg_boost, 0.9, hover_gloss_boost),
         IndicatorState::Running => {
             let (current, _, _) = running_state.unwrap();
             (current, hover_bg_boost, 1.0, hover_gloss_boost)
         }
-        IndicatorState::NoSessions => (ICON_NO_SESSIONS, -0.02 + hover_bg_boost, 0.5, -0.02 + hover_gloss_boost),
+        IndicatorState::NoSessions => (
+            ICON_NO_SESSIONS,
+            -0.02 + hover_bg_boost,
+            0.5,
+            -0.02 + hover_gloss_boost,
+        ),
     };
 
     // Calculate shake offset for attention state
@@ -166,7 +183,6 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bo
         .bg(circle_bg_color)
         .border_1()
         .border_color(border_color)
-        .when(theme.use_shadow, |this| this.shadow_md())
         .relative()
         .overflow_hidden()
         // Gloss highlight (top half) - use explicit size, not w_full
@@ -285,7 +301,9 @@ pub fn render(sessions: &[SessionInfo], animation_start: Instant, is_hovered: bo
                             .items_center()
                             .justify_center()
                             .child(if rotation_radians != 0.0 {
-                                icon_svg.with_transformation(Transformation::rotate(radians(rotation_radians)))
+                                icon_svg.with_transformation(Transformation::rotate(radians(
+                                    rotation_radians,
+                                )))
                             } else {
                                 icon_svg
                             })
@@ -381,11 +399,7 @@ mod tests {
     fn running_icon_mid_transition() {
         let start = Instant::now() - Duration::from_millis(200); // elapsed ~ 200ms
         let (_, _, progress) = get_running_icon_state(start);
-        assert!(
-            progress > 0.3 && progress < 0.7,
-            "progress={}",
-            progress
-        );
+        assert!(progress > 0.3 && progress < 0.7, "progress={}", progress);
     }
 
     #[test]

@@ -9,9 +9,11 @@
 use super::animation::{calculate_shake_offset, ease_in_out};
 use super::icons;
 use super::theme::{ThemeColors, WINDOW_RADIUS};
-use crate::{RunningTool, SessionInfo, SessionState, PLACEHOLDER_TEXTS};
+use crate::{PLACEHOLDER_TEXTS, RunningTool, SessionInfo, SessionState};
 use chrono::{DateTime, Local, Utc};
-use gpui::{div, px, radians, svg, Div, Hsla, InteractiveElement, ParentElement, Styled, Transformation};
+use gpui::{
+    Div, Hsla, InteractiveElement, ParentElement, Styled, Transformation, div, px, radians, svg,
+};
 use std::time::Instant;
 
 /// Session list dimensions
@@ -81,11 +83,7 @@ pub(crate) fn render_row_content(
 }
 
 /// Render the session header (Line 1): state icon + session name
-fn render_session_header(
-    state: SessionState,
-    session_name: &str,
-    args: &RowRenderArgs<'_>,
-) -> Div {
+fn render_session_header(state: SessionState, session_name: &str, args: &RowRenderArgs<'_>) -> Div {
     div()
         .w_full()
         .h(px(18.0)) // Explicit height for h_full children
@@ -120,10 +118,7 @@ fn render_session_header(
 }
 
 /// Render the session event (Line 2): tool or placeholder
-fn render_session_event(
-    session: &SessionInfo,
-    args: &RowRenderArgs<'_>,
-) -> Div {
+fn render_session_event(session: &SessionInfo, args: &RowRenderArgs<'_>) -> Div {
     div()
         .w_full()
         .flex()
@@ -272,7 +267,12 @@ fn render_tool_or_placeholder(
 
 /// Render current tool with vertical slide (ticker) animation
 /// Shows one tool at a time, cycling through the list
-fn render_current_tool(tools: &[RunningTool], tool_index: usize, fade_progress: f32, theme: &ThemeColors) -> Div {
+fn render_current_tool(
+    tools: &[RunningTool],
+    tool_index: usize,
+    fade_progress: f32,
+    theme: &ThemeColors,
+) -> Div {
     // Get current and next tool indices
     let current_idx = tool_index % tools.len();
     let next_idx = (tool_index + 1) % tools.len();
@@ -327,7 +327,10 @@ fn render_current_tool(tools: &[RunningTool], tool_index: usize, fade_progress: 
 }
 
 /// Rotate through recent activity without repeats.
-pub(crate) fn get_recent_activity_text(session: &SessionInfo, animation_start: Instant) -> Option<String> {
+pub(crate) fn get_recent_activity_text(
+    session: &SessionInfo,
+    animation_start: Instant,
+) -> Option<String> {
     let items = &session.recent_activity;
     if items.is_empty() {
         return None;

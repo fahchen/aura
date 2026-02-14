@@ -9,7 +9,7 @@
 //! These helpers just add the subtle glass "shine" details.
 
 use super::theme::ThemeColors;
-use gpui::{div, px, Div, Styled};
+use gpui::{Div, Styled, div, px};
 
 /// Render glass highlight for container (just top edge glow)
 ///
