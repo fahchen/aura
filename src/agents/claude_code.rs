@@ -113,15 +113,11 @@ fn convert_claude_code(hook: &Value) -> Option<Vec<AgentEvent>> {
                 tool_label,
             }];
 
-            if tool_name == "Bash" {
-                if let Some(tool_input) = hook.get("tool_input") {
-                    if let Some(name) = parse_set_name_command(tool_input) {
-                        events.push(AgentEvent::SessionNameUpdated {
-                            session_id,
-                            name,
-                        });
-                    }
-                }
+            if tool_name == "Bash"
+                && let Some(tool_input) = hook.get("tool_input")
+                && let Some(name) = parse_set_name_command(tool_input)
+            {
+                events.push(AgentEvent::SessionNameUpdated { session_id, name });
             }
 
             events
@@ -228,41 +224,7 @@ fn convert_claude_code(hook: &Value) -> Option<Vec<AgentEvent>> {
 /// Returns the extracted name, or `None` if the command is not an `aura set-name` invocation.
 fn parse_set_name_command(tool_input: &Value) -> Option<String> {
     let command = tool_input.get("command")?.as_str()?;
-    let trimmed = command.trim();
-
-    // Use split_whitespace to skip arbitrary interior whitespace, then verify
-    // the first two tokens are "<something>/aura" (or just "aura") and "set-name".
-    // Accepts: "aura", "./aura", "/usr/local/bin/aura", "../aura", etc.
-    let mut tokens = trimmed.split_whitespace();
-    let binary = tokens.next()?;
-    let basename = binary.rsplit('/').next().unwrap_or(binary);
-    if basename != "aura" {
-        return None;
-    }
-    if tokens.next() != Some("set-name") {
-        return None;
-    }
-
-    // Find where the name argument starts in the original string (after "set-name" + whitespace)
-    let set_name_pos = trimmed.find("set-name")?;
-    let after_keyword = &trimmed[set_name_pos + "set-name".len()..];
-    let rest = after_keyword.trim();
-    if rest.is_empty() {
-        return None;
-    }
-
-    // Strip matching quotes if present
-    if (rest.starts_with('"') && rest.ends_with('"'))
-        || (rest.starts_with('\'') && rest.ends_with('\''))
-    {
-        let inner = &rest[1..rest.len() - 1];
-        if inner.is_empty() {
-            return None;
-        }
-        return Some(inner.to_string());
-    }
-
-    Some(rest.to_string())
+    crate::agents::parse_aura_set_name_command(command)
 }
 
 /// Extract a human-readable label for a tool invocation
@@ -606,7 +568,11 @@ mod tests {
         for hook in &hooks {
             let event_name = hook["hook_event_name"].as_str().unwrap();
             let msgs = convert_claude_code(hook).unwrap();
-            assert_eq!(msgs.len(), 1, "{event_name} should produce exactly one event");
+            assert_eq!(
+                msgs.len(),
+                1,
+                "{event_name} should produce exactly one event"
+            );
             let json = serde_json::to_string(&msgs[0]).unwrap();
             assert!(
                 json.contains("\"type\":\"activity\""),
@@ -645,7 +611,10 @@ mod tests {
             "tool_name": "NotebookEdit",
             "tool_input": { "notebook_path": "/home/user/project/analysis.ipynb" }
         });
-        assert_eq!(extract_tool_label(&hook), Some("analysis.ipynb".to_string()));
+        assert_eq!(
+            extract_tool_label(&hook),
+            Some("analysis.ipynb".to_string())
+        );
     }
 
     #[test]
@@ -663,7 +632,10 @@ mod tests {
             "tool_name": "AskUserQuestion",
             "tool_input": { "questions": [] }
         });
-        assert_eq!(extract_tool_label(&hook), Some("AskUserQuestion".to_string()));
+        assert_eq!(
+            extract_tool_label(&hook),
+            Some("AskUserQuestion".to_string())
+        );
     }
 
     #[test]
@@ -731,19 +703,13 @@ mod tests {
     #[test]
     fn parse_set_name_relative_path() {
         let input = serde_json::json!({ "command": "./aura set-name \"fix bug\"" });
-        assert_eq!(
-            parse_set_name_command(&input),
-            Some("fix bug".to_string())
-        );
+        assert_eq!(parse_set_name_command(&input), Some("fix bug".to_string()));
     }
 
     #[test]
     fn parse_set_name_absolute_path() {
         let input = serde_json::json!({ "command": "/usr/local/bin/aura set-name \"fix bug\"" });
-        assert_eq!(
-            parse_set_name_command(&input),
-            Some("fix bug".to_string())
-        );
+        assert_eq!(parse_set_name_command(&input), Some("fix bug".to_string()));
     }
 
     #[test]

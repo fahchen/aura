@@ -1,17 +1,17 @@
 //! Aura — HUD for AI coding agents
 //!
-//! Monitors AI coding sessions via hooks (Claude Code) and app-server (Codex),
+//! Monitors AI coding sessions via hooks (Claude Code) and Codex session rollouts,
 //! and renders the notch-flanking HUD icons.
 
 use aura::agents::claude_code::HookAgent;
 use aura::{registry::SessionRegistry, ui};
 use clap::Parser;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 use std::time::{Duration, Instant};
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 /// Stale timeout - mark session stale after 10min of no activity
 const STALE_TIMEOUT: Duration = Duration::from_secs(600);
@@ -49,8 +49,8 @@ fn init_tracing(verbose: u8) {
         2 => "debug",
         _ => "trace",
     };
-    let filter = EnvFilter::try_from_env("AURA_LOG")
-        .unwrap_or_else(|_| EnvFilter::new(default_level));
+    let filter =
+        EnvFilter::try_from_env("AURA_LOG").unwrap_or_else(|_| EnvFilter::new(default_level));
     fmt().with_env_filter(filter).with_target(false).init();
 }
 
@@ -111,11 +111,18 @@ fn main() {
                 }
             });
 
-            // Spawn Codex app-server client
+            // Spawn Codex session rollout watcher (event stream producer)
+            let codex_stream = aura::agents::codex::spawn();
             let codex_registry = Arc::clone(&bg_registry);
             let codex_dirty = Arc::clone(&bg_dirty);
             tokio::spawn(async move {
-                aura::agents::codex::start(codex_registry, codex_dirty).await;
+                let mut rx = codex_stream.subscribe();
+                while let Some(event) = rx.recv().await {
+                    if let Ok(mut reg) = codex_registry.lock() {
+                        reg.process_event_from(event, aura::AgentType::Codex);
+                        codex_dirty.store(true, Ordering::Relaxed);
+                    }
+                }
             });
 
             // Start IPC socket server (accepts hook events via Unix socket)
