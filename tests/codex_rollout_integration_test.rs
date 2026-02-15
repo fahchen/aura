@@ -1,4 +1,5 @@
 use aura::{AgentEvent, AgentType};
+use chrono::Datelike;
 use std::ffi::OsString;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -20,6 +21,20 @@ fn write_jsonl(path: &Path, lines: &[serde_json::Value]) {
         out.push('\n');
     }
     std::fs::write(path, out).unwrap();
+}
+
+fn tempdir_in_repo() -> TempDir {
+    let base = std::env::current_dir().unwrap().join("target/test-tmp");
+    std::fs::create_dir_all(&base).unwrap();
+    TempDir::new_in(&base).unwrap()
+}
+
+fn today_rollout_dir(base: &Path) -> std::path::PathBuf {
+    let today = chrono::Local::now().date_naive();
+    base.join("sessions")
+        .join(format!("{:04}", today.year()))
+        .join(format!("{:02}", today.month()))
+        .join(format!("{:02}", today.day()))
 }
 
 struct EnvVarGuard {
@@ -90,16 +105,14 @@ async fn recv_until(
 async fn codex_bootstrap_emits_activity_from_existing_rollout() {
     let _guard = env_lock().lock().await;
 
-    let tmp = TempDir::new().unwrap();
+    let tmp = tempdir_in_repo();
     let _env = EnvVarGuard::set("CODEX_HOME", tmp.path());
 
-    let rollout_dir = tmp.path().join("sessions/2026/02/15");
+    let rollout_dir = today_rollout_dir(tmp.path());
     std::fs::create_dir_all(&rollout_dir).unwrap();
 
     let session_id = "019c5edf-c355-7071-b480-eb61d3aabee5";
-    let rollout_path = rollout_dir.join(format!(
-        "rollout-2026-02-15T10-17-28-{session_id}.jsonl"
-    ));
+    let rollout_path = rollout_dir.join(format!("rollout-2026-02-15T10-17-28-{session_id}.jsonl"));
 
     write_jsonl(
         &rollout_path,
@@ -142,10 +155,150 @@ async fn codex_bootstrap_emits_activity_from_existing_rollout() {
         _ => false,
     });
     let saw_activity = events.iter().any(|ev| match ev {
-        AgentEvent::Activity { session_id: sid, .. } => sid == session_id,
+        AgentEvent::Activity {
+            session_id: sid, ..
+        } => sid == session_id,
         _ => false,
     });
 
     assert!(saw_started, "expected SessionStarted for codex session");
-    assert!(saw_activity, "expected Activity emitted from rollout bootstrap");
+    assert!(
+        saw_activity,
+        "expected Activity emitted from rollout bootstrap"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn codex_tail_emits_activity_on_rollout_append() {
+    let _guard = env_lock().lock().await;
+
+    let tmp = tempdir_in_repo();
+    let _env = EnvVarGuard::set("CODEX_HOME", tmp.path());
+
+    let rollout_dir = today_rollout_dir(tmp.path());
+    std::fs::create_dir_all(&rollout_dir).unwrap();
+
+    let session_id = "019c5edf-c355-7071-b480-eb61d3aabee5";
+    let rollout_path = rollout_dir.join(format!("rollout-2026-02-15T10-17-28-{session_id}.jsonl"));
+
+    // Start with only session_meta so bootstrap emits SessionStarted but no Activity.
+    write_jsonl(
+        &rollout_path,
+        &[serde_json::json!({
+            "timestamp":"2026-02-15T01:17:31.178Z",
+            "type":"session_meta",
+            "payload":{ "id": session_id, "cwd":"/tmp/project" }
+        })],
+    );
+
+    let stream = aura::agents::codex::spawn();
+    let mut rx = stream.subscribe();
+
+    let initial = recv_until(&mut rx, Duration::from_secs(2), |ev| {
+        matches!(
+            ev,
+            AgentEvent::SessionStarted { session_id: sid, .. } if sid == session_id
+        )
+    })
+    .await;
+    assert!(
+        initial.iter().any(|ev| matches!(
+            ev,
+            AgentEvent::SessionStarted { session_id: sid, agent, .. }
+                if sid == session_id && agent == &AgentType::Codex
+        )),
+        "expected SessionStarted from bootstrap"
+    );
+
+    // Append a user_message to trigger Activity via notify-driven tailing.
+    let line = serde_json::json!({
+        "timestamp":"2026-02-15T01:17:35.000Z",
+        "type":"event_msg",
+        "payload":{ "type":"user_message", "message":"hello", "images":[], "local_images":[], "text_elements":[] }
+    });
+    {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&rollout_path)
+            .unwrap();
+        writeln!(f, "{}", serde_json::to_string(&line).unwrap()).unwrap();
+        f.flush().unwrap();
+    }
+
+    let events = recv_until(&mut rx, Duration::from_secs(5), |ev| {
+        matches!(
+            ev,
+            AgentEvent::Activity { session_id: sid, .. } if sid == session_id
+        )
+    })
+    .await;
+
+    assert!(
+        events.iter().any(|ev| matches!(
+            ev,
+            AgentEvent::Activity { session_id: sid, cwd } if sid == session_id && cwd == "/tmp/project"
+        )),
+        "expected Activity emitted after appending to rollout; got: {events:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn codex_discovers_new_rollout_created_after_startup() {
+    let _guard = env_lock().lock().await;
+
+    let tmp = tempdir_in_repo();
+    let _env = EnvVarGuard::set("CODEX_HOME", tmp.path());
+
+    let sessions_root = tmp.path().join("sessions");
+    std::fs::create_dir_all(&sessions_root).unwrap();
+
+    let stream = aura::agents::codex::spawn();
+    let mut rx = stream.subscribe();
+
+    let rollout_dir = today_rollout_dir(tmp.path());
+    std::fs::create_dir_all(&rollout_dir).unwrap();
+
+    let session_id = "019c5edf-c355-7071-b480-eb61d3aabee5";
+    let rollout_path = rollout_dir.join(format!("rollout-2026-02-15T10-17-28-{session_id}.jsonl"));
+
+    write_jsonl(
+        &rollout_path,
+        &[
+            serde_json::json!({
+                "timestamp":"2026-02-15T01:17:31.178Z",
+                "type":"session_meta",
+                "payload":{ "id": session_id, "cwd":"/tmp/project" }
+            }),
+            serde_json::json!({
+                "timestamp":"2026-02-15T01:17:31.180Z",
+                "type":"event_msg",
+                "payload":{ "type":"task_started" }
+            }),
+        ],
+    );
+
+    let events = recv_until(&mut rx, Duration::from_secs(5), |ev| {
+        matches!(
+            ev,
+            AgentEvent::Activity { session_id: sid, .. } if sid == session_id
+        )
+    })
+    .await;
+
+    assert!(
+        events.iter().any(|ev| matches!(
+            ev,
+            AgentEvent::SessionStarted { session_id: sid, agent, .. }
+                if sid == session_id && agent == &AgentType::Codex
+        )),
+        "expected SessionStarted after creating rollout"
+    );
+    assert!(
+        events.iter().any(|ev| matches!(
+            ev,
+            AgentEvent::Activity { session_id: sid, .. } if sid == session_id
+        )),
+        "expected Activity after creating rollout; got: {events:?}"
+    );
 }

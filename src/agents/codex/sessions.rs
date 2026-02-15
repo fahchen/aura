@@ -7,6 +7,7 @@
 //! because it consumes Codex's public session rollout files.
 
 use crate::{AgentEvent, AgentType};
+use chrono::{Datelike, Local, NaiveDate};
 use notify::{RecursiveMode, Watcher};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -19,6 +20,7 @@ use tracing::{debug, info, trace, warn};
 
 const BOOTSTRAP_REPLAY_MAX_EVENTS: usize = 4;
 const VISIBILITY_WINDOW: Duration = Duration::from_secs(10 * 60);
+const FALLBACK_SCAN_INTERVAL: Duration = Duration::from_secs(2);
 
 fn codex_home() -> PathBuf {
     if let Some(home) = std::env::var_os("CODEX_HOME") {
@@ -27,10 +29,6 @@ fn codex_home() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".codex")
-}
-
-fn sessions_root() -> PathBuf {
-    codex_home().join("sessions")
 }
 
 fn is_jsonl(path: &Path) -> bool {
@@ -70,6 +68,98 @@ fn read_dir_recursive(root: &Path) -> Vec<PathBuf> {
                 Ok(t) if t.is_dir() => stack.push(p),
                 Ok(t) if t.is_file() && is_jsonl(&p) => out.push(p),
                 _ => {}
+            }
+        }
+    }
+
+    out
+}
+
+fn date_dir(root: &Path, date: NaiveDate) -> PathBuf {
+    root.join(format!("{:04}", date.year()))
+        .join(format!("{:02}", date.month()))
+        .join(format!("{:02}", date.day()))
+}
+
+fn max_numeric_child_dir(parent: &Path, len: usize) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(parent).ok()?;
+    let mut best: Option<(String, PathBuf)> = None;
+
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if name.len() != len || !name.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+
+        match &best {
+            Some((best_name, _)) if name <= best_name.as_str() => {}
+            _ => best = Some((name.to_string(), entry.path())),
+        }
+    }
+
+    best.map(|(_, path)| path)
+}
+
+fn latest_day_dir(root: &Path) -> Option<PathBuf> {
+    let year = max_numeric_child_dir(root, 4)?;
+    let month = max_numeric_child_dir(&year, 2)?;
+    max_numeric_child_dir(&month, 2)
+}
+
+fn candidate_scan_dirs(root: &Path) -> Vec<PathBuf> {
+    let today = Local::now().date_naive();
+    let yesterday = today - chrono::Duration::days(1);
+
+    let mut dirs = vec![
+        root.to_path_buf(),
+        date_dir(root, today),
+        date_dir(root, yesterday),
+    ];
+    if let Some(latest) = latest_day_dir(root) {
+        dirs.push(latest);
+    }
+
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
+async fn read_dir_jsonl(dir: &Path) -> Vec<PathBuf> {
+    let Ok(mut rd) = tokio::fs::read_dir(dir).await else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    while let Ok(Some(entry)) = rd.next_entry().await {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type().await else {
+            continue;
+        };
+        if file_type.is_file() && is_jsonl(&path) {
+            out.push(path);
+        }
+    }
+
+    out
+}
+
+async fn scan_recent_rollouts(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+
+    for dir in candidate_scan_dirs(root) {
+        for path in read_dir_jsonl(&dir).await {
+            if modified_within(&path, VISIBILITY_WINDOW).await {
+                out.push(path);
             }
         }
     }
@@ -273,7 +363,10 @@ impl RolloutState {
                 let payload = value.get("payload").unwrap_or(&Value::Null);
                 let msg_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 match msg_type {
-                    "task_started" | "user_message" | "agent_message" | "entered_review_mode"
+                    "task_started"
+                    | "user_message"
+                    | "agent_message"
+                    | "entered_review_mode"
                     | "exited_review_mode" => {
                         events.push(AgentEvent::Activity {
                             session_id: self.session_id.clone(),
@@ -315,8 +408,14 @@ impl RolloutState {
                 self.apply_response_item(payload, timestamp, &mut events);
             }
             // Older rollouts may emit response item variants directly without a `payload` wrapper.
-            "function_call" | "function_call_output" | "custom_tool_call" | "custom_tool_call_output"
-            | "message" | "reasoning" | "web_search_call" | "ghost_snapshot" => {
+            "function_call"
+            | "function_call_output"
+            | "custom_tool_call"
+            | "custom_tool_call_output"
+            | "message"
+            | "reasoning"
+            | "web_search_call"
+            | "ghost_snapshot" => {
                 self.apply_response_item(value, timestamp, &mut events);
             }
             _ => {}
@@ -325,11 +424,17 @@ impl RolloutState {
         events
     }
 
-    fn apply_response_item(&mut self, payload: &Value, timestamp: Option<&str>, events: &mut Vec<AgentEvent>) {
+    fn apply_response_item(
+        &mut self,
+        payload: &Value,
+        timestamp: Option<&str>,
+        events: &mut Vec<AgentEvent>,
+    ) {
         let payload_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
         match payload_type {
             "function_call" => {
-                let tool_id = json_string_field(payload, &["call_id", "callId"]).unwrap_or("unknown");
+                let tool_id =
+                    json_string_field(payload, &["call_id", "callId"]).unwrap_or("unknown");
                 let tool_name_raw = json_string_field(payload, &["name"]).unwrap_or("tool");
                 let args = payload.get("arguments");
                 let args_json = args.and_then(parse_json_string);
@@ -344,7 +449,9 @@ impl RolloutState {
                     let session_name = crate::agents::parse_aura_set_name_command(cmd);
                     (name, label, session_name)
                 } else {
-                    let label = args_json.as_ref().and_then(|v| tool_label_from_args(tool_name_raw, v));
+                    let label = args_json
+                        .as_ref()
+                        .and_then(|v| tool_label_from_args(tool_name_raw, v));
                     (tool_name_raw.to_string(), label, None)
                 };
 
@@ -363,7 +470,8 @@ impl RolloutState {
                 }
             }
             "function_call_output" => {
-                let tool_id = json_string_field(payload, &["call_id", "callId"]).unwrap_or("unknown");
+                let tool_id =
+                    json_string_field(payload, &["call_id", "callId"]).unwrap_or("unknown");
                 events.push(AgentEvent::ToolCompleted {
                     session_id: self.session_id.clone(),
                     cwd: self.cwd.clone(),
@@ -371,7 +479,8 @@ impl RolloutState {
                 });
             }
             "custom_tool_call" => {
-                let tool_id = json_string_field(payload, &["call_id", "callId"]).unwrap_or("unknown");
+                let tool_id =
+                    json_string_field(payload, &["call_id", "callId"]).unwrap_or("unknown");
                 let tool_name = json_string_field(payload, &["name"]).unwrap_or("custom_tool");
                 events.push(AgentEvent::ToolStarted {
                     session_id: self.session_id.clone(),
@@ -382,7 +491,8 @@ impl RolloutState {
                 });
             }
             "custom_tool_call_output" => {
-                let tool_id = json_string_field(payload, &["call_id", "callId"]).unwrap_or("unknown");
+                let tool_id =
+                    json_string_field(payload, &["call_id", "callId"]).unwrap_or("unknown");
                 events.push(AgentEvent::ToolCompleted {
                     session_id: self.session_id.clone(),
                     cwd: self.cwd.clone(),
@@ -494,7 +604,11 @@ async fn read_first_session_meta(path: &Path) -> Option<(String, String)> {
 
     let payload = value.get("payload").unwrap_or(&Value::Null);
     let id = payload.get("id").and_then(|v| v.as_str())?.to_string();
-    let cwd = payload.get("cwd").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let cwd = payload
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     Some((id, cwd))
 }
 
@@ -525,7 +639,8 @@ async fn bootstrap_rollout(watched: &mut WatchedRollout, tx: &broadcast::Sender<
     }
     watched.offset = buf.len() as u64;
 
-    let mut scan_state = RolloutState::new(watched.state.session_id.clone(), watched.state.cwd.clone());
+    let mut scan_state =
+        RolloutState::new(watched.state.session_id.clone(), watched.state.cwd.clone());
     let mut replay: std::collections::VecDeque<AgentEvent> =
         std::collections::VecDeque::with_capacity(BOOTSTRAP_REPLAY_MAX_EVENTS);
     let mut latest_name: Option<String> = None;
@@ -533,9 +648,11 @@ async fn bootstrap_rollout(watched: &mut WatchedRollout, tx: &broadcast::Sender<
     let path = watched.path.clone();
     watched.buffer = String::from_utf8_lossy(&buf).to_string();
     drain_jsonl_lines(&mut watched.buffer, |line| {
-        let Some(value) =
-            parse_json_line(path.as_path(), line, "malformed JSON in codex rollout bootstrap")
-        else {
+        let Some(value) = parse_json_line(
+            path.as_path(),
+            line,
+            "malformed JSON in codex rollout bootstrap",
+        ) else {
             return;
         };
         for event in scan_state.apply_line(&value) {
@@ -676,8 +793,10 @@ impl DirtyRollouts {
 }
 
 async fn run(tx: broadcast::Sender<AgentEvent>) {
-    let root = sessions_root();
-    let home = codex_home();
+    let home_raw = codex_home();
+    let home = std::fs::canonicalize(&home_raw).unwrap_or_else(|_| home_raw.clone());
+    let root = home.join("sessions");
+    let root_raw = home_raw.join("sessions");
 
     info!(path = %root.display(), "watching codex sessions");
 
@@ -685,56 +804,78 @@ async fn run(tx: broadcast::Sender<AgentEvent>) {
 
     let dirty_cb = Arc::clone(&dirty);
     let sessions_root = root.clone();
-    let mut watcher = match notify::recommended_watcher(
-        move |res: Result<notify::Event, notify::Error>| {
-        let event = match res {
-            Ok(e) => e,
-            Err(err) => {
-                debug!(error = %err, "codex file watcher error");
+    let sessions_root_alt = root_raw.clone();
+    let mut watcher =
+        match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+            let event = match res {
+                Ok(e) => e,
+                Err(err) => {
+                    debug!(error = %err, "codex file watcher error");
+                    dirty_cb.mark_rescan();
+                    return;
+                }
+            };
+
+            if matches!(event.kind, notify::event::EventKind::Other) {
+                // Backends may emit `Other` when details are unreliable (buffer overflow).
                 dirty_cb.mark_rescan();
+                return;
+            }
+
+            if event.paths.is_empty() {
+                // Some backends can emit events without paths (or with paths filtered
+                // out internally). A rescan is cheap and ensures we don't stall.
+                dirty_cb.mark_rescan();
+                return;
+            }
+
+            for path in event.paths {
+                if !path.starts_with(&sessions_root) && !path.starts_with(&sessions_root_alt) {
+                    continue;
+                }
+                if is_jsonl(&path) {
+                    dirty_cb.mark(path);
+                } else {
+                    // Directory-level changes (new subdirs, renames) may not include rollout file paths.
+                    dirty_cb.mark_rescan();
+                }
+            }
+        }) {
+            Ok(w) => w,
+            Err(e) => {
+                warn!(error = %e, "failed to initialize codex file watcher");
                 return;
             }
         };
 
-        if matches!(event.kind, notify::event::EventKind::Other) {
-            // Backends may emit `Other` when details are unreliable (buffer overflow).
-            dirty_cb.mark_rescan();
-            return;
-        }
-
-        for path in event.paths {
-            if !path.starts_with(&sessions_root) {
-                continue;
-            }
-            if is_jsonl(&path) {
-                dirty_cb.mark(path);
-            } else {
-                // Directory-level changes (new subdirs, renames) may not include rollout file paths.
-                dirty_cb.mark_rescan();
-            }
-        }
-    },
-    ) {
-        Ok(w) => w,
-        Err(e) => {
-            warn!(error = %e, "failed to initialize codex file watcher");
-            return;
-        }
-    };
-
-    // Watch Codex home (non-recursive) to detect `sessions/` creation. When `sessions/`
-    // exists we additionally watch it recursively for rollout changes.
-    if let Err(e) = watcher.watch(&home, RecursiveMode::NonRecursive) {
-        warn!(path = %home.display(), error = %e, "failed to watch codex home");
-        return;
-    }
-
+    // Avoid overlapping watches on macOS (FSEvents) where a parent NonRecursive watch
+    // can mask a child Recursive watch. Prefer watching the sessions root directly.
     let mut sessions_watched = false;
+    let mut home_watched = false;
+
     if root.exists() {
         match watcher.watch(&root, RecursiveMode::Recursive) {
             Ok(()) => sessions_watched = true,
-            Err(e) => warn!(path = %root.display(), error = %e, "failed to watch codex sessions"),
+            Err(e) => {
+                warn!(
+                    path = %root.display(),
+                    error = %e,
+                    "failed to watch codex sessions; falling back to codex home"
+                );
+                if let Err(e) = watcher.watch(&home, RecursiveMode::Recursive) {
+                    warn!(path = %home.display(), error = %e, "failed to watch codex home");
+                    return;
+                }
+                home_watched = true;
+            }
         }
+    } else {
+        // Watch Codex home (non-recursive) to detect `sessions/` creation.
+        if let Err(e) = watcher.watch(&home, RecursiveMode::NonRecursive) {
+            warn!(path = %home.display(), error = %e, "failed to watch codex home");
+            return;
+        }
+        home_watched = true;
     }
 
     // Bootstrap: register all existing rollouts. For "recent" rollouts (mtime <= 10m),
@@ -763,14 +904,39 @@ async fn run(tx: broadcast::Sender<AgentEvent>) {
         debug!("codex rollouts registered: {}", watched.len());
     }
 
+    let mut scan_tick = tokio::time::interval(FALLBACK_SCAN_INTERVAL);
+    scan_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
     loop {
-        dirty.notify.notified().await;
+        let mut ticked = false;
+        tokio::select! {
+            biased;
+            _ = scan_tick.tick() => ticked = true,
+            _ = dirty.notify.notified() => {},
+        }
 
         let (rescan, mut paths) = dirty.drain();
-        if rescan {
+        if ticked && root.exists() {
+            paths.extend(scan_recent_rollouts(&root).await);
+        }
+
+        if rescan || ticked {
             if !sessions_watched && root.exists() {
                 match watcher.watch(&root, RecursiveMode::Recursive) {
-                    Ok(()) => sessions_watched = true,
+                    Ok(()) => {
+                        sessions_watched = true;
+                        if home_watched {
+                            if let Err(e) = watcher.unwatch(&home) {
+                                warn!(
+                                    path = %home.display(),
+                                    error = %e,
+                                    "failed to unwatch codex home"
+                                );
+                            } else {
+                                home_watched = false;
+                            }
+                        }
+                    }
                     Err(e) => warn!(
                         path = %root.display(),
                         error = %e,
@@ -779,7 +945,7 @@ async fn run(tx: broadcast::Sender<AgentEvent>) {
                 }
             }
 
-            if root.exists() {
+            if rescan && root.exists() {
                 paths.extend(read_dir_recursive(&root));
             }
         }
@@ -869,7 +1035,11 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         match &events[0] {
-            AgentEvent::SessionStarted { session_id, cwd, agent } => {
+            AgentEvent::SessionStarted {
+                session_id,
+                cwd,
+                agent,
+            } => {
                 assert_eq!(session_id, "sess_1");
                 assert_eq!(cwd, "/tmp/project");
                 assert_eq!(agent, &AgentType::Codex);
@@ -896,7 +1066,12 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         match &events[0] {
-            AgentEvent::ToolStarted { tool_id, tool_name, tool_label, .. } => {
+            AgentEvent::ToolStarted {
+                tool_id,
+                tool_name,
+                tool_label,
+                ..
+            } => {
                 assert_eq!(tool_id, "call_1");
                 assert_eq!(tool_name, "rg");
                 assert_eq!(tool_label.as_deref(), Some("rg -n foo src"));
@@ -922,7 +1097,11 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         match &events[0] {
-            AgentEvent::ToolStarted { tool_name, tool_label, .. } => {
+            AgentEvent::ToolStarted {
+                tool_name,
+                tool_label,
+                ..
+            } => {
                 assert_eq!(tool_name, "mcp__nowledge-mem__memory_search");
                 assert_eq!(tool_label.as_deref(), Some("hello world"));
             }
@@ -948,11 +1127,21 @@ mod tests {
         assert_eq!(events.len(), 2);
         match (&events[0], &events[1]) {
             (
-                AgentEvent::ToolStarted { tool_id: start_id, tool_name, tool_label, .. },
-                AgentEvent::ToolCompleted { tool_id: end_id, .. }
+                AgentEvent::ToolStarted {
+                    tool_id: start_id,
+                    tool_name,
+                    tool_label,
+                    ..
+                },
+                AgentEvent::ToolCompleted {
+                    tool_id: end_id, ..
+                },
             ) => {
                 assert_eq!(tool_name, "WebSearch");
-                assert_eq!(tool_label.as_deref(), Some("thread/loaded/list vs thread/list"));
+                assert_eq!(
+                    tool_label.as_deref(),
+                    Some("thread/loaded/list vs thread/list")
+                );
                 assert_eq!(start_id, end_id);
             }
             other => panic!("unexpected events: {other:?}"),
@@ -980,7 +1169,12 @@ mod tests {
         assert_eq!(events.len(), 2);
         match (&events[0], &events[1]) {
             (
-                AgentEvent::ToolStarted { tool_id, tool_name, tool_label, .. },
+                AgentEvent::ToolStarted {
+                    tool_id,
+                    tool_name,
+                    tool_label,
+                    ..
+                },
                 AgentEvent::SessionNameUpdated { session_id, name },
             ) => {
                 assert_eq!(tool_id, "call_1");
@@ -1040,12 +1234,8 @@ mod tests {
         );
 
         let (tx, mut rx) = broadcast::channel(32);
-        let mut watched = WatchedRollout::new_existing(
-            path.clone(),
-            "fallback".to_string(),
-            "".to_string(),
-            0,
-        );
+        let mut watched =
+            WatchedRollout::new_existing(path.clone(), "fallback".to_string(), "".to_string(), 0);
 
         bootstrap_rollout(&mut watched, &tx).await;
 
@@ -1053,7 +1243,11 @@ mod tests {
         assert_eq!(events.len(), 6);
 
         match &events[0] {
-            AgentEvent::SessionStarted { session_id, cwd, agent } => {
+            AgentEvent::SessionStarted {
+                session_id,
+                cwd,
+                agent,
+            } => {
                 assert_eq!(session_id, "sess_1");
                 assert_eq!(cwd, "/tmp/project");
                 assert_eq!(agent, &AgentType::Codex);
@@ -1071,10 +1265,24 @@ mod tests {
 
         match (&events[2], &events[3], &events[4], &events[5]) {
             (
-                AgentEvent::ToolCompleted { session_id, cwd, tool_id },
-                AgentEvent::Idle { session_id: s2, cwd: c2 },
-                AgentEvent::Compacting { session_id: s3, cwd: c3 },
-                AgentEvent::WaitingForInput { session_id: s4, cwd: c4, message: _ },
+                AgentEvent::ToolCompleted {
+                    session_id,
+                    cwd,
+                    tool_id,
+                },
+                AgentEvent::Idle {
+                    session_id: s2,
+                    cwd: c2,
+                },
+                AgentEvent::Compacting {
+                    session_id: s3,
+                    cwd: c3,
+                },
+                AgentEvent::WaitingForInput {
+                    session_id: s4,
+                    cwd: c4,
+                    message: _,
+                },
             ) => {
                 assert_eq!(session_id, "sess_1");
                 assert_eq!(cwd, "/tmp/project");
@@ -1114,12 +1322,8 @@ mod tests {
         set_file_mtime(&path, FileTime::from_system_time(old)).unwrap();
 
         let (tx, mut rx) = broadcast::channel(8);
-        let mut watched = WatchedRollout::new_existing(
-            path.clone(),
-            "fallback".to_string(),
-            "".to_string(),
-            0,
-        );
+        let mut watched =
+            WatchedRollout::new_existing(path.clone(), "fallback".to_string(), "".to_string(), 0);
 
         bootstrap_rollout(&mut watched, &tx).await;
 
@@ -1171,12 +1375,8 @@ mod tests {
         );
 
         let (tx, mut rx) = broadcast::channel(16);
-        let mut watched = WatchedRollout::new_existing(
-            path.clone(),
-            "fallback".to_string(),
-            "".to_string(),
-            0,
-        );
+        let mut watched =
+            WatchedRollout::new_existing(path.clone(), "fallback".to_string(), "".to_string(), 0);
 
         bootstrap_rollout(&mut watched, &tx).await;
 
@@ -1184,7 +1384,11 @@ mod tests {
         assert_eq!(events.len(), 5, "SessionStarted + 4 Activity events");
 
         match &events[0] {
-            AgentEvent::SessionStarted { session_id, cwd, agent } => {
+            AgentEvent::SessionStarted {
+                session_id,
+                cwd,
+                agent,
+            } => {
                 assert_eq!(session_id, "sess_1");
                 assert_eq!(cwd, "/tmp/project");
                 assert_eq!(agent, &AgentType::Codex);
@@ -1268,8 +1472,15 @@ mod tests {
 
         match (&events[0], &events[1]) {
             (
-                AgentEvent::SessionStarted { session_id, cwd, agent },
-                AgentEvent::SessionNameUpdated { session_id: s2, name },
+                AgentEvent::SessionStarted {
+                    session_id,
+                    cwd,
+                    agent,
+                },
+                AgentEvent::SessionNameUpdated {
+                    session_id: s2,
+                    name,
+                },
             ) => {
                 assert_eq!(session_id, "sess_1");
                 assert_eq!(cwd, "/tmp/project");

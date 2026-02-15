@@ -123,8 +123,7 @@ fn save_config_to(config: &Config, path: &Path) -> Result<(), std::io::Error> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let json = serde_json::to_string_pretty(config)
-        .map_err(std::io::Error::other)?;
+    let json = serde_json::to_string_pretty(config).map_err(std::io::Error::other)?;
     atomic_write(path, json.as_bytes())
 }
 
@@ -139,8 +138,7 @@ fn save_state_to(state: &State, path: &Path) -> Result<(), std::io::Error> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let json = serde_json::to_string_pretty(state)
-        .map_err(std::io::Error::other)?;
+    let json = serde_json::to_string_pretty(state).map_err(std::io::Error::other)?;
     atomic_write(path, json.as_bytes())
 }
 
