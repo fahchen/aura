@@ -6,14 +6,17 @@
 //! This integration works even when Codex is started externally (e.g. via `codex` CLI)
 //! because it consumes Codex's public session rollout files.
 
+mod parser;
+mod paths;
+
+use self::parser::RolloutState;
 use crate::{AgentEvent, AgentType};
-use chrono::{Datelike, Local, NaiveDate};
 use notify::{RecursiveMode, Watcher};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::{Notify, broadcast};
 use tracing::{debug, info, trace, warn};
@@ -21,194 +24,6 @@ use tracing::{debug, info, trace, warn};
 const BOOTSTRAP_REPLAY_MAX_EVENTS: usize = 4;
 const VISIBILITY_WINDOW: Duration = Duration::from_secs(10 * 60);
 const FALLBACK_SCAN_INTERVAL: Duration = Duration::from_secs(2);
-
-fn codex_home() -> PathBuf {
-    if let Some(home) = std::env::var_os("CODEX_HOME") {
-        return PathBuf::from(home);
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".codex")
-}
-
-fn is_jsonl(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"))
-}
-
-fn session_id_from_path(path: &Path) -> String {
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown");
-
-    // Common format: `rollout-<timestamp>-<uuid>.jsonl` (uuid has 5 `-` segments).
-    let parts: Vec<&str> = stem.split('-').collect();
-    if parts.len() >= 6 {
-        return parts[parts.len() - 5..].join("-");
-    }
-
-    stem.to_string()
-}
-
-fn read_dir_recursive(root: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-
-    while let Some(path) = stack.pop() {
-        let entries = match std::fs::read_dir(&path) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-
-        for entry in entries.flatten() {
-            let p = entry.path();
-            match entry.file_type() {
-                Ok(t) if t.is_dir() => stack.push(p),
-                Ok(t) if t.is_file() && is_jsonl(&p) => out.push(p),
-                _ => {}
-            }
-        }
-    }
-
-    out
-}
-
-fn date_dir(root: &Path, date: NaiveDate) -> PathBuf {
-    root.join(format!("{:04}", date.year()))
-        .join(format!("{:02}", date.month()))
-        .join(format!("{:02}", date.day()))
-}
-
-fn max_numeric_child_dir(parent: &Path, len: usize) -> Option<PathBuf> {
-    let entries = std::fs::read_dir(parent).ok()?;
-    let mut best: Option<(String, PathBuf)> = None;
-
-    for entry in entries.flatten() {
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if !file_type.is_dir() {
-            continue;
-        }
-
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        if name.len() != len || !name.chars().all(|c| c.is_ascii_digit()) {
-            continue;
-        }
-
-        match &best {
-            Some((best_name, _)) if name <= best_name.as_str() => {}
-            _ => best = Some((name.to_string(), entry.path())),
-        }
-    }
-
-    best.map(|(_, path)| path)
-}
-
-fn latest_day_dir(root: &Path) -> Option<PathBuf> {
-    let year = max_numeric_child_dir(root, 4)?;
-    let month = max_numeric_child_dir(&year, 2)?;
-    max_numeric_child_dir(&month, 2)
-}
-
-fn candidate_scan_dirs(root: &Path) -> Vec<PathBuf> {
-    let today = Local::now().date_naive();
-    let yesterday = today - chrono::Duration::days(1);
-
-    let mut dirs = vec![
-        root.to_path_buf(),
-        date_dir(root, today),
-        date_dir(root, yesterday),
-    ];
-    if let Some(latest) = latest_day_dir(root) {
-        dirs.push(latest);
-    }
-
-    dirs.sort();
-    dirs.dedup();
-    dirs
-}
-
-async fn read_dir_jsonl(dir: &Path) -> Vec<PathBuf> {
-    let Ok(mut rd) = tokio::fs::read_dir(dir).await else {
-        return Vec::new();
-    };
-
-    let mut out = Vec::new();
-    while let Ok(Some(entry)) = rd.next_entry().await {
-        let path = entry.path();
-        let Ok(file_type) = entry.file_type().await else {
-            continue;
-        };
-        if file_type.is_file() && is_jsonl(&path) {
-            out.push(path);
-        }
-    }
-
-    out
-}
-
-async fn scan_recent_rollouts(root: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-
-    for dir in candidate_scan_dirs(root) {
-        for path in read_dir_jsonl(&dir).await {
-            if modified_within(&path, VISIBILITY_WINDOW).await {
-                out.push(path);
-            }
-        }
-    }
-
-    out
-}
-
-fn json_string_field<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
-    keys.iter()
-        .find_map(|key| value.get(*key))
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-}
-
-fn truncate_owned(value: &str, max: usize) -> String {
-    crate::agents::truncate(value, max).to_string()
-}
-
-fn first_shell_token(command: &str) -> Option<String> {
-    command
-        .split_whitespace()
-        .next()
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-        .map(ToString::to_string)
-}
-
-fn tool_label_from_args(tool_name: &str, args_json: &Value) -> Option<String> {
-    // Common shapes across built-in tools.
-    if let Some(path) = json_string_field(args_json, &["path", "file_path", "filePath"]) {
-        Some(crate::agents::short_path(path))
-    } else if let Some(cmd) = json_string_field(args_json, &["cmd", "command"]) {
-        Some(truncate_owned(cmd, 60))
-    } else if let Some(query) = json_string_field(args_json, &["query", "q"]) {
-        Some(truncate_owned(query, 60))
-    } else if tool_name.starts_with("mcp__") {
-        // MCP payloads often put useful UX context in `arguments` as structured JSON.
-        json_string_field(args_json, &["arguments", "input", "message"])
-            .map(|v| truncate_owned(v, 60))
-    } else {
-        None
-    }
-}
-
-fn parse_json_string(value: &Value) -> Option<Value> {
-    let s = value.as_str()?;
-    serde_json::from_str(s).ok()
-}
 
 fn parse_json_line(path: &Path, line: &str, context: &'static str) -> Option<Value> {
     match serde_json::from_str(line) {
@@ -240,304 +55,6 @@ fn drain_jsonl_lines(buffer: &mut String, mut on_line: impl FnMut(&str)) {
 
     if start > 0 {
         *buffer = buffer[start..].to_string();
-    }
-}
-
-async fn modified_within(path: &Path, window: Duration) -> bool {
-    let Ok(meta) = tokio::fs::metadata(path).await else {
-        return false;
-    };
-    let Ok(modified) = meta.modified() else {
-        return false;
-    };
-    let age = SystemTime::now()
-        .duration_since(modified)
-        .unwrap_or(Duration::ZERO);
-    age <= window
-}
-
-#[derive(Debug, Clone)]
-struct RolloutState {
-    session_id: String,
-    cwd: String,
-    session_emitted: bool,
-    web_search_seq: u64,
-}
-
-impl RolloutState {
-    fn new(session_id: String, cwd: String) -> Self {
-        Self {
-            session_id,
-            cwd,
-            session_emitted: false,
-            web_search_seq: 0,
-        }
-    }
-
-    fn ensure_session_event(&mut self) -> Option<AgentEvent> {
-        if self.session_emitted {
-            return None;
-        }
-        self.session_emitted = true;
-        Some(AgentEvent::SessionStarted {
-            session_id: self.session_id.clone(),
-            cwd: self.cwd.clone(),
-            agent: AgentType::Codex,
-        })
-    }
-
-    fn maybe_update_cwd(&mut self, next_cwd: &str) -> Option<AgentEvent> {
-        let next_cwd = next_cwd.trim();
-        if next_cwd.is_empty() || next_cwd == self.cwd {
-            return None;
-        }
-        self.cwd = next_cwd.to_string();
-        self.session_emitted.then(|| AgentEvent::SessionStarted {
-            session_id: self.session_id.clone(),
-            cwd: self.cwd.clone(),
-            agent: AgentType::Codex,
-        })
-    }
-
-    fn apply_line(&mut self, value: &Value) -> Vec<AgentEvent> {
-        let mut events = Vec::new();
-        let line_type = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        let timestamp = value
-            .get("timestamp")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|v| !v.is_empty());
-
-        match line_type {
-            "session_meta" => {
-                if let Some(payload) = value.get("payload").and_then(|v| v.as_object()) {
-                    if let Some(id) = payload.get("id").and_then(|v| v.as_str()) {
-                        // Prefer session_meta id when we haven't emitted events yet. (It should
-                        // match the filename suffix; this also handles any parsing drift.)
-                        if !self.session_emitted {
-                            self.session_id = id.to_string();
-                        } else if self.session_id != id {
-                            warn!(
-                                current = %self.session_id,
-                                meta = %id,
-                                "codex rollout session id changed after emission; ignoring"
-                            );
-                        }
-                    }
-                    if let Some(cwd) = payload.get("cwd").and_then(|v| v.as_str()) {
-                        if let Some(update) = self.maybe_update_cwd(cwd) {
-                            events.push(update);
-                        } else if self.cwd.is_empty() {
-                            self.cwd = cwd.to_string();
-                        }
-                    }
-                }
-
-                if let Some(start) = self.ensure_session_event() {
-                    events.push(start);
-                }
-                return events;
-            }
-            "turn_context" => {
-                if let Some(payload) = value.get("payload")
-                    && let Some(cwd) = payload.get("cwd").and_then(|v| v.as_str())
-                {
-                    if let Some(update) = self.maybe_update_cwd(cwd) {
-                        events.push(update);
-                    } else if self.cwd.is_empty() {
-                        self.cwd = cwd.to_string();
-                    }
-                }
-                // No user-facing state change; treat as activity at most.
-                return events;
-            }
-            _ => {}
-        }
-
-        if let Some(start) = self.ensure_session_event() {
-            events.push(start);
-        }
-
-        match line_type {
-            "event_msg" => {
-                let payload = value.get("payload").unwrap_or(&Value::Null);
-                let msg_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                match msg_type {
-                    "task_started"
-                    | "user_message"
-                    | "agent_message"
-                    | "entered_review_mode"
-                    | "exited_review_mode" => {
-                        events.push(AgentEvent::Activity {
-                            session_id: self.session_id.clone(),
-                            cwd: self.cwd.clone(),
-                        });
-                    }
-                    "context_compacted" => {
-                        events.push(AgentEvent::Compacting {
-                            session_id: self.session_id.clone(),
-                            cwd: self.cwd.clone(),
-                        });
-                    }
-                    "task_complete" | "turn_aborted" => {
-                        events.push(AgentEvent::Idle {
-                            session_id: self.session_id.clone(),
-                            cwd: self.cwd.clone(),
-                        });
-                    }
-                    "request_user_input" => {
-                        events.push(AgentEvent::WaitingForInput {
-                            session_id: self.session_id.clone(),
-                            cwd: self.cwd.clone(),
-                            message: None,
-                        });
-                    }
-                    // High-frequency / non-UX events.
-                    "token_count" | "agent_reasoning" => {}
-                    _ => {}
-                }
-            }
-            "compacted" => {
-                events.push(AgentEvent::Compacting {
-                    session_id: self.session_id.clone(),
-                    cwd: self.cwd.clone(),
-                });
-            }
-            "response_item" => {
-                let payload = value.get("payload").unwrap_or(&Value::Null);
-                self.apply_response_item(payload, timestamp, &mut events);
-            }
-            // Older rollouts may emit response item variants directly without a `payload` wrapper.
-            "function_call"
-            | "function_call_output"
-            | "custom_tool_call"
-            | "custom_tool_call_output"
-            | "message"
-            | "reasoning"
-            | "web_search_call"
-            | "ghost_snapshot" => {
-                self.apply_response_item(value, timestamp, &mut events);
-            }
-            _ => {}
-        }
-
-        events
-    }
-
-    fn apply_response_item(
-        &mut self,
-        payload: &Value,
-        timestamp: Option<&str>,
-        events: &mut Vec<AgentEvent>,
-    ) {
-        let payload_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        match payload_type {
-            "function_call" => {
-                let tool_id =
-                    json_string_field(payload, &["call_id", "callId"]).unwrap_or("unknown");
-                let tool_name_raw = json_string_field(payload, &["name"]).unwrap_or("tool");
-                let args = payload.get("arguments");
-                let args_json = args.and_then(parse_json_string);
-
-                let (tool_name, tool_label, session_name) = if tool_name_raw == "exec_command" {
-                    let cmd = args_json
-                        .as_ref()
-                        .and_then(|v| json_string_field(v, &["cmd"]))
-                        .unwrap_or("");
-                    let name = first_shell_token(cmd).unwrap_or_else(|| "exec".to_string());
-                    let label = (!cmd.is_empty()).then(|| truncate_owned(cmd, 60));
-                    let session_name = crate::agents::parse_aura_set_name_command(cmd);
-                    (name, label, session_name)
-                } else {
-                    let label = args_json
-                        .as_ref()
-                        .and_then(|v| tool_label_from_args(tool_name_raw, v));
-                    (tool_name_raw.to_string(), label, None)
-                };
-
-                events.push(AgentEvent::ToolStarted {
-                    session_id: self.session_id.clone(),
-                    cwd: self.cwd.clone(),
-                    tool_id: tool_id.to_string(),
-                    tool_name,
-                    tool_label,
-                });
-                if let Some(name) = session_name {
-                    events.push(AgentEvent::SessionNameUpdated {
-                        session_id: self.session_id.clone(),
-                        name,
-                    });
-                }
-            }
-            "function_call_output" => {
-                let tool_id =
-                    json_string_field(payload, &["call_id", "callId"]).unwrap_or("unknown");
-                events.push(AgentEvent::ToolCompleted {
-                    session_id: self.session_id.clone(),
-                    cwd: self.cwd.clone(),
-                    tool_id: tool_id.to_string(),
-                });
-            }
-            "custom_tool_call" => {
-                let tool_id =
-                    json_string_field(payload, &["call_id", "callId"]).unwrap_or("unknown");
-                let tool_name = json_string_field(payload, &["name"]).unwrap_or("custom_tool");
-                events.push(AgentEvent::ToolStarted {
-                    session_id: self.session_id.clone(),
-                    cwd: self.cwd.clone(),
-                    tool_id: tool_id.to_string(),
-                    tool_name: tool_name.to_string(),
-                    tool_label: None,
-                });
-            }
-            "custom_tool_call_output" => {
-                let tool_id =
-                    json_string_field(payload, &["call_id", "callId"]).unwrap_or("unknown");
-                events.push(AgentEvent::ToolCompleted {
-                    session_id: self.session_id.clone(),
-                    cwd: self.cwd.clone(),
-                    tool_id: tool_id.to_string(),
-                });
-            }
-            "web_search_call" => {
-                // This response item is already `status: completed` in observed rollouts, so we
-                // emit an immediate start+complete to show it as "recent activity" for a moment.
-                let tool_id = timestamp
-                    .map(|t| format!("web_search:{t}"))
-                    .unwrap_or_else(|| {
-                        self.web_search_seq += 1;
-                        format!("web_search:seq:{}", self.web_search_seq)
-                    });
-
-                let query = payload
-                    .get("action")
-                    .and_then(|v| v.get("query"))
-                    .and_then(|v| v.as_str())
-                    .map(|q| truncate_owned(q, 60));
-
-                events.push(AgentEvent::ToolStarted {
-                    session_id: self.session_id.clone(),
-                    cwd: self.cwd.clone(),
-                    tool_id: tool_id.clone(),
-                    tool_name: "WebSearch".to_string(),
-                    tool_label: query,
-                });
-                events.push(AgentEvent::ToolCompleted {
-                    session_id: self.session_id.clone(),
-                    cwd: self.cwd.clone(),
-                    tool_id,
-                });
-            }
-            "message" | "reasoning" => {
-                events.push(AgentEvent::Activity {
-                    session_id: self.session_id.clone(),
-                    cwd: self.cwd.clone(),
-                });
-            }
-            // Not surfaced in the HUD (state is derived from other messages).
-            "ghost_snapshot" => {}
-            _ => {}
-        }
     }
 }
 
@@ -618,7 +135,7 @@ async fn file_len(path: &Path) -> Option<u64> {
 
 async fn bootstrap_rollout(watched: &mut WatchedRollout, tx: &broadcast::Sender<AgentEvent>) {
     // Ignore stale sessions to avoid flooding the HUD with historical rollouts.
-    if !modified_within(&watched.path, VISIBILITY_WINDOW).await {
+    if !paths::modified_within(&watched.path, VISIBILITY_WINDOW).await {
         watched.offset = file_len(&watched.path).await.unwrap_or(watched.offset);
         watched.buffer.clear();
         return;
@@ -793,10 +310,10 @@ impl DirtyRollouts {
 }
 
 async fn run(tx: broadcast::Sender<AgentEvent>) {
-    let home_raw = codex_home();
-    let home = std::fs::canonicalize(&home_raw).unwrap_or_else(|_| home_raw.clone());
-    let root = home.join("sessions");
-    let root_raw = home_raw.join("sessions");
+    let codex_paths = paths::CodexPaths::detect();
+    let home = codex_paths.home;
+    let root = codex_paths.sessions_root;
+    let root_alt = codex_paths.sessions_root_alt;
 
     info!(path = %root.display(), "watching codex sessions");
 
@@ -804,7 +321,7 @@ async fn run(tx: broadcast::Sender<AgentEvent>) {
 
     let dirty_cb = Arc::clone(&dirty);
     let sessions_root = root.clone();
-    let sessions_root_alt = root_raw.clone();
+    let sessions_root_alt = root_alt.clone();
     let mut watcher =
         match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
             let event = match res {
@@ -833,7 +350,7 @@ async fn run(tx: broadcast::Sender<AgentEvent>) {
                 if !path.starts_with(&sessions_root) && !path.starts_with(&sessions_root_alt) {
                     continue;
                 }
-                if is_jsonl(&path) {
+                if paths::is_jsonl(&path) {
                     dirty_cb.mark(path);
                 } else {
                     // Directory-level changes (new subdirs, renames) may not include rollout file paths.
@@ -882,8 +399,8 @@ async fn run(tx: broadcast::Sender<AgentEvent>) {
     // emit a bounded replay to seed the HUD.
     let mut watched: HashMap<PathBuf, WatchedRollout> = HashMap::new();
     if root.exists() {
-        for path in read_dir_recursive(&root) {
-            let mut session_id = session_id_from_path(&path);
+        for path in paths::read_dir_recursive(&root) {
+            let mut session_id = paths::session_id_from_path(&path);
             let mut cwd = String::new();
             if let Some((meta_id, meta_cwd)) = read_first_session_meta(&path).await {
                 session_id = meta_id;
@@ -891,7 +408,7 @@ async fn run(tx: broadcast::Sender<AgentEvent>) {
             }
 
             let mut rollout = WatchedRollout::new_existing(path.clone(), session_id, cwd, 0);
-            if modified_within(&path, VISIBILITY_WINDOW).await {
+            if paths::modified_within(&path, VISIBILITY_WINDOW).await {
                 bootstrap_rollout(&mut rollout, &tx).await;
                 // Catch any bytes appended during bootstrap scan.
                 tail_rollout(&mut rollout, &tx).await;
@@ -917,7 +434,7 @@ async fn run(tx: broadcast::Sender<AgentEvent>) {
 
         let (rescan, mut paths) = dirty.drain();
         if ticked && root.exists() {
-            paths.extend(scan_recent_rollouts(&root).await);
+            paths.extend(paths::scan_recent_rollouts(&root, VISIBILITY_WINDOW).await);
         }
 
         if rescan || ticked {
@@ -946,7 +463,7 @@ async fn run(tx: broadcast::Sender<AgentEvent>) {
             }
 
             if rescan && root.exists() {
-                paths.extend(read_dir_recursive(&root));
+                paths.extend(paths::read_dir_recursive(&root));
             }
         }
 
@@ -960,7 +477,7 @@ async fn run(tx: broadcast::Sender<AgentEvent>) {
 
         for path in paths {
             if !watched.contains_key(&path) {
-                let mut session_id = session_id_from_path(&path);
+                let mut session_id = paths::session_id_from_path(&path);
                 let mut cwd = String::new();
                 if let Some((meta_id, meta_cwd)) = read_first_session_meta(&path).await {
                     session_id = meta_id;
@@ -1001,6 +518,7 @@ mod tests {
     use super::*;
     use filetime::{FileTime, set_file_mtime};
     use serde_json::json;
+    use std::time::SystemTime;
     use tempfile::TempDir;
 
     fn write_jsonl(path: &Path, lines: &[Value]) {
@@ -1023,168 +541,6 @@ mod tests {
             }
         }
         out
-    }
-
-    #[test]
-    fn session_meta_emits_session_started() {
-        let mut state = RolloutState::new("fallback".to_string(), "".to_string());
-        let events = state.apply_line(&json!({
-            "type": "session_meta",
-            "payload": { "id": "sess_1", "cwd": "/tmp/project" }
-        }));
-
-        assert_eq!(events.len(), 1);
-        match &events[0] {
-            AgentEvent::SessionStarted {
-                session_id,
-                cwd,
-                agent,
-            } => {
-                assert_eq!(session_id, "sess_1");
-                assert_eq!(cwd, "/tmp/project");
-                assert_eq!(agent, &AgentType::Codex);
-            }
-            other => panic!("unexpected event: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn exec_command_function_call_maps_to_tool_with_cmd_label() {
-        let mut state = RolloutState::new("sess_1".to_string(), "/tmp".to_string());
-        let _ = state.ensure_session_event();
-
-        let events = state.apply_line(&json!({
-            "type": "response_item",
-            "timestamp": "2026-02-14T00:00:00Z",
-            "payload": {
-                "type": "function_call",
-                "call_id": "call_1",
-                "name": "exec_command",
-                "arguments": "{\"cmd\":\"rg -n foo src\"}"
-            }
-        }));
-
-        assert_eq!(events.len(), 1);
-        match &events[0] {
-            AgentEvent::ToolStarted {
-                tool_id,
-                tool_name,
-                tool_label,
-                ..
-            } => {
-                assert_eq!(tool_id, "call_1");
-                assert_eq!(tool_name, "rg");
-                assert_eq!(tool_label.as_deref(), Some("rg -n foo src"));
-            }
-            other => panic!("unexpected event: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn mcp_tool_call_extracts_query_label() {
-        let mut state = RolloutState::new("sess_1".to_string(), "/tmp".to_string());
-        let _ = state.ensure_session_event();
-
-        let events = state.apply_line(&json!({
-            "type": "response_item",
-            "payload": {
-                "type": "function_call",
-                "call_id": "call_2",
-                "name": "mcp__nowledge-mem__memory_search",
-                "arguments": "{\"query\":\"hello world\"}"
-            }
-        }));
-
-        assert_eq!(events.len(), 1);
-        match &events[0] {
-            AgentEvent::ToolStarted {
-                tool_name,
-                tool_label,
-                ..
-            } => {
-                assert_eq!(tool_name, "mcp__nowledge-mem__memory_search");
-                assert_eq!(tool_label.as_deref(), Some("hello world"));
-            }
-            other => panic!("unexpected event: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn web_search_call_emits_immediate_tool_lifecycle() {
-        let mut state = RolloutState::new("sess_1".to_string(), "/tmp".to_string());
-        let _ = state.ensure_session_event();
-
-        let events = state.apply_line(&json!({
-            "type": "response_item",
-            "timestamp": "2026-02-14T00:00:00Z",
-            "payload": {
-                "type": "web_search_call",
-                "status": "completed",
-                "action": { "type": "search", "query": "thread/loaded/list vs thread/list" }
-            }
-        }));
-
-        assert_eq!(events.len(), 2);
-        match (&events[0], &events[1]) {
-            (
-                AgentEvent::ToolStarted {
-                    tool_id: start_id,
-                    tool_name,
-                    tool_label,
-                    ..
-                },
-                AgentEvent::ToolCompleted {
-                    tool_id: end_id, ..
-                },
-            ) => {
-                assert_eq!(tool_name, "WebSearch");
-                assert_eq!(
-                    tool_label.as_deref(),
-                    Some("thread/loaded/list vs thread/list")
-                );
-                assert_eq!(start_id, end_id);
-            }
-            other => panic!("unexpected events: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn exec_command_set_name_emits_session_name_updated() {
-        let mut state = RolloutState::new("sess_1".to_string(), "/tmp".to_string());
-        let _ = state.ensure_session_event();
-
-        let args = serde_json::json!({ "cmd": "aura set-name \"my session\"" });
-        let args_str = serde_json::to_string(&args).unwrap();
-
-        let events = state.apply_line(&json!({
-            "type": "response_item",
-            "payload": {
-                "type": "function_call",
-                "call_id": "call_1",
-                "name": "exec_command",
-                "arguments": args_str
-            }
-        }));
-
-        assert_eq!(events.len(), 2);
-        match (&events[0], &events[1]) {
-            (
-                AgentEvent::ToolStarted {
-                    tool_id,
-                    tool_name,
-                    tool_label,
-                    ..
-                },
-                AgentEvent::SessionNameUpdated { session_id, name },
-            ) => {
-                assert_eq!(tool_id, "call_1");
-                assert_eq!(tool_name, "aura");
-                assert_eq!(tool_label.as_deref(), Some("aura set-name \"my session\""));
-                assert_eq!(session_id, "sess_1");
-                assert_eq!(name, "my session");
-            }
-            other => panic!("unexpected events: {other:?}"),
-        }
     }
 
     #[tokio::test]
