@@ -6,11 +6,17 @@
 use aura::agents::claude_code::HookAgent;
 use aura::{registry::SessionRegistry, ui};
 use clap::Parser;
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
+#[cfg(target_os = "macos")]
+use std::process::Command as ProcessCommand;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 use std::time::{Duration, Instant};
+#[cfg(target_os = "macos")]
+use tracing::{debug, info};
 use tracing_subscriber::{EnvFilter, fmt};
 
 /// Stale timeout - mark session stale after 10min of no activity
@@ -54,6 +60,81 @@ fn init_tracing(verbose: u8) {
     fmt().with_env_filter(filter).with_target(false).init();
 }
 
+#[cfg(target_os = "macos")]
+fn escape_single_quotes_for_shell(s: &str) -> String {
+    // POSIX shell: to embed a single quote inside a single-quoted string, close it, escape, reopen.
+    // Example: abc'def -> 'abc'\''def'
+    s.replace('\'', "'\\''")
+}
+
+/// Install the `aura` CLI to `/usr/local/bin` when running from an app bundle.
+///
+/// This mimics VS Code's behavior of installing a shell command for the GUI app.
+#[cfg(target_os = "macos")]
+fn install_cli_tool() {
+    let Ok(exe_path) = std::env::current_exe() else {
+        debug!("Could not determine current exe path");
+        return;
+    };
+
+    let exe_path_str = exe_path.to_string_lossy();
+    if !exe_path_str.contains(".app/Contents/MacOS") {
+        debug!("Not running from app bundle, skipping CLI install");
+        return;
+    }
+
+    let target_path = PathBuf::from("/usr/local/bin/aura");
+
+    // Check if symlink already exists and points to correct location.
+    if target_path.is_symlink() {
+        if let Ok(link_target) = std::fs::read_link(&target_path) {
+            if link_target == exe_path {
+                debug!("CLI tool already installed correctly");
+                return;
+            }
+            info!(
+                "CLI symlink exists but points to {:?}, updating",
+                link_target
+            );
+        }
+    } else if target_path.exists() {
+        info!("CLI path exists but is not a symlink, skipping");
+        return;
+    }
+
+    info!("Installing CLI tool to /usr/local/bin");
+
+    let exe_path_escaped = escape_single_quotes_for_shell(&exe_path_str);
+    let script = format!(
+        "do shell script \"mkdir -p /usr/local/bin && ln -sf '{}' '/usr/local/bin/aura'\" with administrator privileges",
+        exe_path_escaped
+    );
+
+    match ProcessCommand::new("osascript")
+        .args(["-e", &script])
+        .output()
+    {
+        Ok(output) => {
+            if output.status.success() {
+                info!("CLI tool installed successfully");
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if stderr.contains("User canceled") || stderr.contains("(-128)") {
+                    info!("User canceled CLI installation");
+                } else {
+                    debug!("CLI installation failed: {}", stderr);
+                }
+            }
+        }
+        Err(e) => {
+            debug!("Failed to run osascript: {}", e);
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_cli_tool() {}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -71,6 +152,9 @@ fn main() {
     }
 
     init_tracing(cli.verbose);
+
+    // Install CLI tool if running from app bundle (macOS only).
+    install_cli_tool();
 
     // Shared registry between background tasks and UI
     // Using std::sync::Mutex so it's accessible from both tokio and gpui threads
