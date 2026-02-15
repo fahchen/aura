@@ -4,6 +4,7 @@
 //! (or `$CODEX_HOME/sessions`).
 
 use crate::AgentEvent;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::broadcast;
 
 pub mod sessions;
@@ -13,6 +14,7 @@ const EVENT_BUFFER: usize = 4096;
 #[derive(Debug, Clone)]
 pub struct CodexEventStream {
     tx: broadcast::Sender<AgentEvent>,
+    started: Arc<OnceLock<()>>,
 }
 
 #[derive(Debug)]
@@ -27,7 +29,12 @@ impl CodexEventStream {
     /// the Codex integration is best-effort and Aura does not attempt to recover
     /// missed events.
     pub fn subscribe(&self) -> CodexEventRx {
-        CodexEventRx { rx: self.tx.subscribe() }
+        // Create the receiver first, then start the producer so bootstrap events
+        // can't race ahead of the first subscriber.
+        let rx = self.tx.subscribe();
+        self.started
+            .get_or_init(|| sessions::spawn(self.tx.clone()));
+        CodexEventRx { rx }
     }
 }
 
@@ -46,6 +53,8 @@ impl CodexEventRx {
 /// Spawn the Codex integration and return an event stream handle.
 pub fn spawn() -> CodexEventStream {
     let (tx, _rx) = broadcast::channel(EVENT_BUFFER);
-    sessions::spawn(tx.clone());
-    CodexEventStream { tx }
+    CodexEventStream {
+        tx,
+        started: Arc::new(OnceLock::new()),
+    }
 }
