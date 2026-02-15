@@ -1,6 +1,7 @@
 //! Unix socket server for receiving agent events from aura-hook
 //!
-//! Listens on `/tmp/aura.sock` for newline-delimited JSON messages.
+//! Listens on `std::env::temp_dir()/aura.sock` (via [`crate::ipc::socket_path`]) for
+//! newline-delimited JSON messages.
 //! Each message is deserialized directly as an `AgentEvent`.
 
 use crate::AgentEvent;
